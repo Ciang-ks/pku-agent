@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "noEmit": true,
+    "paths": {
+      "@pku-study/core": ["packages/core/src/index.ts"],
+      "@pku-study/server": ["apps/server/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

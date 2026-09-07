@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.vite/
+coverage/
+.vitest-tmp/
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.pku-study/
+reference/

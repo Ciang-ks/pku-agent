@@ -1,4 +1,7 @@
 import { createServer } from "./server.js";
+import { configureCloudHttp } from "@pku-study/core";
+
+configureCloudHttp();
 
 const host = process.env.PKU_STUDY_HOST ?? "127.0.0.1";
 const port = Number(process.env.PKU_STUDY_PORT ?? "4317");

@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
+import type { TeachingContent } from "../integrations/pku3b/structured-types.js";
 import type {
   CourseCandidate,
   CourseCandidateReview,
@@ -204,6 +205,11 @@ export class SqliteStore {
         local_path TEXT,
         updated_at TEXT NOT NULL,
         UNIQUE(provider, remote_course_id, remote_resource_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS remote_resource_details (
+        resource_id TEXT PRIMARY KEY REFERENCES remote_resources(resource_id) ON DELETE CASCADE,
+        content_json TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS jobs (
@@ -410,6 +416,7 @@ export class SqliteStore {
         )
         ON CONFLICT(resource_id) DO UPDATE SET
           title = excluded.title,
+          kind = excluded.kind,
           parent_id = excluded.parent_id,
           has_details = excluded.has_details,
           updated_at = excluded.updated_at
@@ -425,6 +432,7 @@ export class SqliteStore {
 
   replaceRemoteResources(courseId: string, resources: RemoteResourceRef[]): void {
     const replace = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM remote_resource_details WHERE resource_id IN (SELECT resource_id FROM remote_resources WHERE course_id = ?)").run(courseId);
       for (const resource of resources) this.upsertRemoteResource(resource);
       if (resources.length === 0) {
         this.db.prepare("DELETE FROM remote_resources WHERE course_id = ?").run(courseId);
@@ -464,6 +472,16 @@ export class SqliteStore {
          WHERE resource_id = ?`,
       )
       .run(localPath, new Date().toISOString(), resourceId);
+  }
+
+  saveRemoteResourceContent(resourceId: string, content: TeachingContent): void {
+    this.db.prepare("INSERT INTO remote_resource_details(resource_id, content_json) VALUES (?, ?) ON CONFLICT(resource_id) DO UPDATE SET content_json = excluded.content_json")
+      .run(resourceId, JSON.stringify(content));
+  }
+
+  getRemoteResourceContent(resourceId: string): TeachingContent | undefined {
+    const row = this.db.prepare("SELECT content_json FROM remote_resource_details WHERE resource_id = ?").get(resourceId) as { content_json: string } | undefined;
+    return row ? JSON.parse(row.content_json) as TeachingContent : undefined;
   }
 
   replaceTeachingItems(

@@ -143,8 +143,14 @@ export function parseGrades(output: string, context: ParseContext): TeachingItem
   return items;
 }
 
-export function courseLabelMatches(label: string, localCourseName: string): boolean {
-  return normalizeCourseLabel(label) === normalizeCourseLabel(localCourseName);
+export function courseLabelMatches(label: string, localCourseName: string, localTerm?: string): boolean {
+  const remote = splitCourseLabel(label);
+  const local = splitCourseLabel(localCourseName);
+  if (normalizeCourseLabel(remote.name) !== normalizeCourseLabel(local.name)) return false;
+  const expectedTerm = local.term ?? localTerm;
+  // Announcements expose only the name. Where a term is present, retain it to
+  // avoid mixing repeated courses across semesters during --all-term sync.
+  return !remote.term || !expectedTerm || normalizeTerm(remote.term) === normalizeTerm(expectedTerm);
 }
 
 function cleanLines(output: string): string[] {
@@ -181,9 +187,24 @@ function baseItem(
 function normalizeCourseLabel(value: string): string {
   return value
     .normalize("NFKC")
-    .replace(/\s*[（(](?:20\d{2}|春|秋|Spring|Fall|Summer|Autumn).*?[）)]\s*$/i, "")
     .replace(/\s+/g, "")
     .toLowerCase();
+}
+
+function splitCourseLabel(value: string): { name: string; term?: string } {
+  const normalized = value.normalize("NFKC").trim();
+  const match = /^(.*?)\s*\(((?:\d{2,4}-\d{2,4}学年第[12]学期|20\d{2}[^()]*|春[^()]*|秋[^()]*|Spring[^()]*|Fall[^()]*|Summer[^()]*|Autumn[^()]*))\)\s*$/i.exec(normalized);
+  return match ? { name: match[1]!.trim(), term: match[2]! } : { name: normalized };
+}
+
+function normalizeTerm(value: string): string {
+  const normalized = value.normalize("NFKC").toLowerCase().replace(/autumn/g, "fall").trim();
+  const academic = /^(\d{2}|20\d{2})-(\d{2}|20\d{2})学年第([12])学期$/.exec(normalized);
+  if (academic) {
+    const year = academic[3] === "1" ? academic[1]! : academic[2]!;
+    return `${year.length === 2 ? `20${year}` : year}${academic[3] === "1" ? "fall" : "spring"}`;
+  }
+  return normalized.replace(/[\s_-]+/g, "");
 }
 
 function relativeDueAt(text: string, anchor: Date): string | undefined {

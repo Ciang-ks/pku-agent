@@ -13,3 +13,4 @@ coverage/
 !.env.example
 .pku-study/
 reference/
+__pycache__/

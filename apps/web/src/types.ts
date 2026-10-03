@@ -64,6 +64,14 @@ export interface RemoteResource {
   updatedAt: string;
 }
 
+export interface RemoteResourceDetail extends RemoteResource {
+  detailsAvailable: boolean;
+  descriptions: string[];
+  attachments: { name: string }[];
+  sourceUrl?: string;
+  canImport: boolean;
+}
+
 export interface RemoteContentNode extends RemoteResource {
   children: RemoteContentNode[];
 }
@@ -248,3 +256,5 @@ export interface TreeholeAuthStatus {
   detail?: string;
   updatedAt: string;
 }
+
+export type { Lesson, Material, MaterialRole, LessonOutline, SourceSelection, CreateLessonInput, LessonMaterialRef, LessonContext, LessonArtifact } from "../../../packages/core/src/learning/types";

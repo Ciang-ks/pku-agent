@@ -3,6 +3,9 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 export const courseSkillNames = [
+  "lesson-learning",
+  "lesson-review",
+  "material-organizer",
   "course-review",
   "course-sync",
   "lecture-notes",
@@ -28,6 +31,51 @@ export interface CourseSkillInstallOptions {
 }
 
 const courseSkills: readonly CourseSkillDefinition[] = [
+  {
+    name: "lesson-learning",
+    content: `---
+name: lesson-learning
+description: Organize one lesson from recording outline through selected material passages to an editable learning document.
+---
+
+# Lesson learning
+
+If read_lesson_context is available, this is a scoped lesson session: read that snapshot and its warnings first, use only its source blocks, save the lecture with save_lesson_lecture and save requested exercises/other outputs with save_lesson_artifact. Preserve manual edits and the existing outline. Do not use the general-course steps below, transcribe, or expand the source scope.
+
+Work in the active course. Use list_lessons/get_lesson to identify the requested lesson and read its current revision/document. Create a lesson only if it does not exist. Resume from saved progress instead of repeating completed transcription or outline steps.
+
+1. When teaching-network data is needed, sync_course and list_recordings. Stop only if authentication or missing input is required; report the job ID for the interface.
+2. List_materials; classify textbooks, supplementary books and slides from the actual content. Parse unready document materials. Import requested remote resources using import_course_resource, which waits for download and ingestion. Check parsing status, do not claim failed material is ready.
+3. For uploaded recordings use transcribe_uploaded_recording with the registered asset ID. For each lesson recording without a transcript, transcribe_lesson_recording then attach_lesson_transcript with the returned completed job message path. Read ALL transcript blocks in bounded read_source_range calls. If no recording exists, use the explicit user scope or material-based outline and label that basis.
+4. Save_lesson_outline FIRST: actual topics, sequence, summaries and timestamp ranges. Reuse a user-edited outline unless asked to change it.
+5. For each topic search_course, then read_source_range to inspect exact passages in textbooks/slides/supplements and classroom additions. Select only relevant block IDs, preserving definitions, proofs, examples, formulas and diagrams. Save_lesson_selections with reasons. A whole book is not a lesson. Explain missing or contradictory source material.
+6. Read_lesson_sources, then compose a coherent Markdown lecture following the outline. Preserve valid image paths from the sources. Never turn an image placeholder into an empty or invented image URL; state when the source image is unavailable. Save_lesson_document using the latest revision. Preserve the user's existing edits when updating a document; a revision conflict requires reconciliation, not a blind retry.
+
+The user asking to organize a lesson authorizes saving the outline, selections and document. Continue through these steps without separate confirmations. Finish with the saved lesson title and any missing source coverage. Do not substitute a chat answer for the saved document.
+`,
+  },
+  {
+    name: "lesson-review",
+    content: `---
+name: lesson-review
+description: Save a concise revision outline for the active lesson from its bounded source context.
+disable-model-invocation: true
+---
+
+Read read_lesson_context first. Use only this lesson's supplied blocks and existing lecture. Report missing or truncated material. Create a concise revision outline with key concepts, reasoning steps, common mistakes supported by the source, and questions for self-check. Preserve formulas and valid images. Save with save_lesson_artifact, kind=other, a descriptive title and Markdown. Never expand the source scope, run ASR, or change another lesson. If the context is stale, explain that a fresh conversation is required. If no scoped lesson context tool is available, ask the user to open the desired lesson before using this workflow.
+`,
+  },
+  {
+    name: "material-organizer",
+    content: `---
+name: material-organizer
+description: Inspect public course materials and classify their roles without moving or deleting files.
+disable-model-invocation: true
+---
+
+Use list_materials to inspect this course's public materials (coursePublic is not false). Do not change lesson-only assets. For unready document files requested by the user, use parse_material and report failed parsing accurately. Do not transcribe recordings. Read limited source ranges before deciding whether a file is a textbook, supplement, slides, recording or other. Apply classify_material only when its content supports the role; leave uncertain classifications unchanged and explain them. Do not delete, rename, copy, remove lesson references, or change public/private membership. Finish with a brief list of changed roles and files that need attention.
+`,
+  },
   {
     name: "course-review",
     content: `---
@@ -55,7 +103,7 @@ disable-model-invocation: true
 
 Use this workflow only for the active course.
 
-1. Call \`list_course_resources\` before recommending or importing a resource.
+1. Call \`sync_course\` to fetch current metadata, then \`list_course_resources\` before recommending or importing a resource.
 2. Use \`get_course_resource\` when the user asks about one listed resource.
 3. Import only resources the user has selected or clearly requested, using \`import_course_resource\` with the listed resource ID.
 4. Report the returned job ID and use \`get_job_status\` when the user asks for progress.
@@ -106,6 +154,8 @@ disable-model-invocation: true
 ---
 
 # Practice set
+
+If read_lesson_context is available, use only that snapshot and the current lesson lecture. Save the questions and separate answers with save_lesson_artifact (kind=practice). Unless specified, generate 5 mixed-difficulty questions. Do not use course search or save_practice_set in this scoped mode.
 
 Use the current course's indexed material. Search broadly enough to cover the requested topic, then inspect the relevant assets before generating questions. Match the requested difficulty and count; if either is ambiguous, ask a concise clarifying question.
 

@@ -1,10 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
+import { access, lstat, realpath, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { promisify } from "node:util";
-import { tmpdir } from "node:os";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type {
   CourseDocumentBlock,
   CourseNoteSource,
@@ -12,154 +9,20 @@ import type {
   DocumentParserProvider,
   DocumentSearchResult,
   ParsedDocument,
-  ParsedDocumentBlock,
 } from "../domain/types.js";
 import type { SqliteStore } from "../storage/sqlite-store.js";
 import type { CourseWorkspaceService } from "../storage/course-workspace-service.js";
 import { OpenAiEmbeddingProvider } from "./openai-embedding-provider.js";
 
-const execFileAsync = promisify(execFile);
-
-export class TextDocumentParser implements DocumentParserProvider {
-  async parse(input: { filePath: string; content: string }): Promise<ParsedDocument> {
-    const lines = input.content.replace(/\r\n?/g, "\n").split("\n");
-    const blocks: ParsedDocumentBlock[] = [];
-    let heading = basename(input.filePath).replace(/\.[^.]+$/, "");
-    let paragraph: string[] = [];
-    const flush = (): void => {
-      const text = paragraph.join(" ").replace(/\s+/g, " ").trim();
-      if (text) blocks.push({ contentType: "paragraph", text, heading });
-      paragraph = [];
-    };
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      const markdownHeading = /^(#{1,6})\s+(.+?)\s*#*$/.exec(line);
-      if (markdownHeading?.[2]) {
-        flush();
-        heading = markdownHeading[2].trim();
-        blocks.push({ contentType: "heading", text: heading, heading });
-        continue;
-      }
-      if (!line) {
-        flush();
-        continue;
-      }
-      paragraph.push(line);
-    }
-    flush();
-    return { title: basename(input.filePath), blocks };
-  }
-}
-
-export class MineruMarkdownParser implements DocumentParserProvider {
-  async parse(input: { filePath: string; content: string }): Promise<ParsedDocument> {
-    const lines = input.content.replace(/\r\n?/g, "\n").split("\n");
-    const blocks: ParsedDocumentBlock[] = [];
-    let heading = basename(input.filePath).replace(/\.[^.]+$/, "");
-    let page: number | undefined;
-    let paragraph: string[] = [];
-    const flush = (): void => {
-      const text = paragraph.join(" ").replace(/\s+/g, " ").trim();
-      if (text) blocks.push({ contentType: "paragraph", text, heading, ...(page === undefined ? {} : { page }) });
-      paragraph = [];
-    };
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      const marker = /^(?:<!--\s*(?:page(?:\s+number)?|page_number)\s*[:=]\s*(\d+)\s*-->|\[page\s+(\d+)\])$/i.exec(line);
-      if (marker) {
-        flush();
-        page = Number(marker[1] ?? marker[2]);
-        continue;
-      }
-      const markdownHeading = /^(#{1,6})\s+(.+?)\s*#*$/.exec(line);
-      if (markdownHeading?.[2]) {
-        flush();
-        heading = markdownHeading[2].trim();
-        blocks.push({ contentType: "heading", text: heading, heading, ...(page === undefined ? {} : { page }) });
-        continue;
-      }
-      if (!line) {
-        flush();
-        continue;
-      }
-      paragraph.push(line);
-    }
-    flush();
-    return { title: basename(input.filePath), blocks };
-  }
-}
-
-export interface MineruDocumentParserOptions {
-  executable?: string;
-  /** MinerU cloud model used by the Standard API. */
-  model?: "pipeline" | "vlm" | "MinerU-HTML";
-  /** @deprecated Use model. Kept for callers compiled against the old local CLI adapter. */
-  backend?: "pipeline" | "hybrid-auto" | "vlm-auto";
-  api?: "auto" | "agent" | "standard";
-  timeoutMs?: number;
-}
-
-export class MineruDocumentParser implements DocumentParserProvider {
-  private readonly executable: string;
-  private readonly model: "pipeline" | "vlm" | "MinerU-HTML";
-  private readonly api: "auto" | "agent" | "standard";
-  private readonly timeoutMs: number;
-  private readonly markdownParser = new MineruMarkdownParser();
-
-  constructor(options: MineruDocumentParserOptions = {}) {
-    this.executable = options.executable ?? process.env.PKU_STUDY_MINERU_COMMAND ?? "mineru";
-    this.model = options.model ?? (options.backend === "pipeline" ? "pipeline" : "vlm");
-    this.api = options.api ?? "auto";
-    this.timeoutMs = options.timeoutMs ?? 10 * 60_000;
-  }
-
-  async parse(input: { filePath: string; content: string }): Promise<ParsedDocument> {
-    const outputDir = await mkdtemp(join(tmpdir(), "pku-study-mineru-"));
-    try {
-      // MinerU-Skill is a zero-dependency cloud wrapper. Keep the output on disk
-      // so images/Markdown can be normalized and indexed without trusting stdout.
-      // `--engine cloud` is explicit to prevent accidentally enabling its optional
-      // local PyMuPDF path on a machine where no model weights should be present.
-      await execFileAsync(this.executable, [
-        input.filePath,
-        "--output", outputDir,
-        "--api", this.api,
-        "--model", this.model,
-        "--engine", "cloud",
-        "--workers", "1",
-        "--timeout", String(Math.ceil(this.timeoutMs / 1000)),
-        "--quiet",
-      ], {
-        encoding: "utf8",
-        timeout: this.timeoutMs,
-        maxBuffer: 8 * 1024 * 1024,
-        windowsHide: true,
-        env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
-      });
-      const markdownPath = await findFirstMarkdown(outputDir);
-      if (!markdownPath) throw new Error("MinerU did not produce a Markdown output.");
-      return this.markdownParser.parse({ filePath: input.filePath, content: await readFile(markdownPath, "utf8") });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new DocumentServiceError("MINERU_FAILED", `MinerU parsing failed: ${message.slice(0, 500)}`, 502);
-    } finally {
-      await rm(outputDir, { recursive: true, force: true });
-    }
-  }
-}
-
-class CompositeDocumentParser implements DocumentParserProvider {
-  private readonly text = new TextDocumentParser();
-  private readonly mineru: MineruDocumentParser;
-
-  constructor(mineru?: MineruDocumentParser) {
-    this.mineru = mineru ?? new MineruDocumentParser();
-  }
-
-  parse(input: { filePath: string; content: string }): Promise<ParsedDocument> {
-    return /\.pdf$/i.test(input.filePath) ? this.mineru.parse(input) : this.text.parse(input);
-  }
-}
+import { CompositeDocumentParser, MineruMarkdownParser } from "./parsers/index.js";
+import { cosineSimilarity, reciprocalRankFusion } from "./ranking.js";
+import { normalizedMarkdown } from "./normalized-markdown.js";
+import { DocumentServiceError } from "./errors.js";
+// Compatibility exports for existing CLI, tests and library consumers.
+export * from "./parsers/index.js";
+export * from "./ranking.js";
+export * from "./normalized-markdown.js";
+export * from "./errors.js";
 
 export interface DocumentServiceOptions {
   store: SqliteStore;
@@ -181,8 +44,8 @@ export class DocumentService {
     const course = this.options.courses.get(courseId);
     if (!course) throw new DocumentServiceError("COURSE_NOT_FOUND", "Course not found.", 404);
     const path = this.resolveCoursePath(course.rootPath, requestedPath);
-    if (!/\.(md|markdown|txt|pdf)$/i.test(path)) {
-      throw new DocumentServiceError("UNSUPPORTED_DOCUMENT", "Only PDF, Markdown and text assets can be indexed.", 415);
+    if (!/\.(md|markdown|txt|pdf|pptx?|docx?|png|jpe?g|webp)$/i.test(path)) {
+      throw new DocumentServiceError("UNSUPPORTED_DOCUMENT", "Unsupported document format.", 415);
     }
     try {
       await access(path, constants.R_OK);
@@ -205,13 +68,16 @@ export class DocumentService {
         400,
       );
     }
+    const realRoot = await realpath(course.rootPath);
+    const realFile = await realpath(path);
+    if (!realFile.startsWith(`${realRoot}${sep}`)) throw new DocumentServiceError("ASSET_PATH_FORBIDDEN", "Asset escapes course workspace.", 400);
     const sourcePath = relative(course.rootPath, path);
-    const parsed = await this.parser.parse({ filePath: path, content: /\.pdf$/i.test(path) ? "" : await readFile(path, "utf8") });
-    const indexedSourcePath = /\.pdf$/i.test(path)
+    const parsed = await this.parser.parse({ filePath: path, content: /\.(md|markdown|txt)$/i.test(path) ? await readFile(path, "utf8") : "" });
+    const indexedSourcePath = !/\.(md|markdown|txt)$/i.test(path) || sourcePath.startsWith(`materials${sep}original${sep}`)
       ? await this.writeNormalizedMarkdown(course.rootPath, sourcePath, parsed)
       : sourcePath;
     const blocks = parsed.blocks.map((block, index) => ({
-      blockId: createHash("sha256").update(`${courseId}\0${path}\0${index}\0${block.text}`).digest("hex").slice(0, 32),
+      blockId: createHash("sha256").update(`${courseId}\0${indexedSourcePath}\0${index}\0${block.text}`).digest("hex").slice(0, 32),
       courseId,
       sourcePath: indexedSourcePath,
       title: parsed.title,
@@ -346,13 +212,29 @@ export class DocumentService {
     parsed: ParsedDocument,
   ): Promise<string> {
     const hash = createHash("sha256").update(sourcePath).digest("hex").slice(0, 12);
-    const stem = basename(sourcePath).replace(/\.pdf$/i, "").replace(/[^\p{Letter}\p{Number}._-]+/gu, "-") || "document";
+    const stem = basename(sourcePath).replace(/\.[^.]+$/, "").replace(/[^\p{Letter}\p{Number}._-]+/gu, "-") || "document";
     const relativeOutputPath = join("materials", "text", "parsed", `${stem}-${hash}.md`);
     const outputPath = this.resolveCoursePath(rootPath, relativeOutputPath);
     await mkdir(join(rootPath, "materials", "text", "parsed"), { recursive: true });
     const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, normalizedMarkdown(parsed), { encoding: "utf8", flag: "wx" });
+    let markdown = normalizedMarkdown(parsed);
+    for (const attachment of parsed.attachments ?? []) {
+      const assetPath = join("materials", "text", "parsed", `${stem}-${hash}-assets`, attachment.path);
+      const destination = this.resolveCoursePath(rootPath, assetPath);
+      const imageRoot = join(rootPath, "materials", "text", "parsed", `${stem}-${hash}-assets`);
+      if (!destination.startsWith(`${imageRoot}${sep}`) || !/\.(png|jpe?g|webp|gif)$/i.test(destination))
+        throw new DocumentServiceError("PARSER_ATTACHMENT_INVALID", "Invalid parser attachment path.", 502);
+      await mkdir(dirname(destination), { recursive: true });
+      await writeFile(destination, attachment.data);
+      const portablePath = assetPath.split(sep).join("/");
+      markdown = markdown.split(`](${attachment.path})`).join(`](${portablePath})`);
+      for (const block of parsed.blocks) block.text = block.text.split(`](${attachment.path})`).join(`](${portablePath})`);
+    }
+    await writeFile(temporaryPath, markdown, { encoding: "utf8", flag: "wx" });
     await rename(temporaryPath, outputPath);
+    // Index the same paragraph boundaries that a rebuild reads from disk.
+    // Structured cloud blocks may contain multiple paragraphs or captions.
+    parsed.blocks = (await new MineruMarkdownParser().parse({ filePath: outputPath, content: markdown })).blocks;
     return relativeOutputPath;
   }
 
@@ -392,64 +274,5 @@ export class DocumentService {
         if (stat.isFile()) assets.push(relative(rootPath, path));
       }
     }
-  }
-}
-
-async function findFirstMarkdown(root: string): Promise<string | undefined> {
-  const entries = await readdir(root, { withFileTypes: true });
-  for (const entry of entries) {
-    const path = join(root, entry.name);
-    if (entry.isDirectory()) {
-      const nested = await findFirstMarkdown(path);
-      if (nested) return nested;
-    } else if (entry.isFile() && /\.md$/i.test(entry.name)) {
-      return path;
-    }
-  }
-  return undefined;
-}
-
-export function normalizedMarkdown(parsed: ParsedDocument): string {
-  const lines: string[] = [];
-  let previousPage: number | undefined;
-  for (const block of parsed.blocks) {
-    if (block.page !== undefined && block.page !== previousPage) {
-      lines.push(`<!-- page: ${block.page} -->`, "");
-      previousPage = block.page;
-    }
-    lines.push(block.contentType === "heading" ? `# ${block.text}` : block.text, "");
-  }
-  return `${lines.join("\n").trimEnd()}\n`;
-}
-
-export function cosineSimilarity(left: number[], right: number[]): number {
-  if (left.length === 0 || left.length !== right.length) return 0;
-  let dot = 0;
-  let leftNorm = 0;
-  let rightNorm = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    const a = left[index]!;
-    const b = right[index]!;
-    dot += a * b;
-    leftNorm += a * a;
-    rightNorm += b * b;
-  }
-  return leftNorm === 0 || rightNorm === 0 ? 0 : dot / Math.sqrt(leftNorm * rightNorm);
-}
-
-export function reciprocalRankFusion(...rankings: string[][]): { blockId: string; score: number }[] {
-  const scores = new Map<string, number>();
-  const k = 60;
-  for (const ranking of rankings) {
-    ranking.forEach((blockId, index) => scores.set(blockId, (scores.get(blockId) ?? 0) + 1 / (k + index + 1)));
-  }
-  return [...scores.entries()]
-    .map(([blockId, score]) => ({ blockId, score }))
-    .sort((left, right) => right.score - left.score || left.blockId.localeCompare(right.blockId));
-}
-
-export class DocumentServiceError extends Error {
-  constructor(readonly code: string, message: string, readonly statusCode: number) {
-    super(message);
   }
 }

@@ -7,6 +7,7 @@ export * from "./domain/types.js";
 export * from "./integrations/pku3b/output.js";
 export * from "./integrations/pku3b/status-output.js";
 export * from "./integrations/pku3b/pku3b-adapter.js";
+export * from "./integrations/pku3b/structured-types.js";
 export * from "./integrations/pku3b/teaching-network-service.js";
 export * from "./integrations/treehole/treehole-provider.js";
 export * from "./jobs/job-manager.js";
@@ -21,3 +22,10 @@ export * from "./recordings/recording-service.js";
 export * from "./assignments/assignment-service.js";
 export * from "./assignments/pdf-export-service.js";
 export * from "./documents/pdf-renderer.js";
+
+export * from "./learning/types.js";
+export * from "./learning/schemas.js";
+export * from "./learning/lesson-service.js";
+export * from "./materials/material-service.js";
+export * from "./integrations/pku3b/course-discovery-service.js";
+export { configureCloudHttp } from "./http-runtime.js";

@@ -104,6 +104,7 @@ export const sendAgentMessageSchema = z.object({
 });
 
 export const createAgentSessionSchema = z.object({
+  assetIds: z.array(z.uuid()).max(20).optional(),
   name: z.string().trim().min(1).max(100).optional(),
 }).strict();
 

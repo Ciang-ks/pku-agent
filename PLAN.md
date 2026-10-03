@@ -1,5 +1,7 @@
 # PKU Study：基于 Pi 的文本中心学习平台实施方案
 
+> 2026-09-08 需求对齐：当前产品基线与实现核查见 [docs/REQUIREMENTS_ALIGNMENT.md](docs/REQUIREMENTS_ALIGNMENT.md)。本文件保留前期设计背景；与新基线冲突的“按文件生成笔记、生成前逐份手工选择、默认本地 MinerU”等条目不再作为实施要求。主线调整为 pku3b 课程组织 → 每节课 → 录播大纲 → 多资料范围选取 → 可阅读编辑的讲义，Agent/Skills 编排，模型计算优先云端 API，作业流程后置。
+
 ## 1. 总体设计
 
 构建一个本地优先、单用户、跨平台的学习工作台。以课程为核心，将教学网资料、录播转写、课堂笔记、作业、自测和树洞检索统一组织起来。
@@ -154,7 +156,7 @@ flowchart LR
 
 ### 文档解析与课程检索
 
-- 默认使用本地 [MinerU](https://github.com/opendatalab/MinerU) 处理文本 PDF、扫描 PDF、表格和公式。
+- 默认使用 MinerU 云端解析服务处理文本 PDF、扫描 PDF、表格和公式；当前代码通过 MinerU-Skill CLI 的 `--engine cloud` 接入，不依赖本地模型权重。
 - 定义 `DocumentParserProvider`，为未来接入 PaddleOCR 保留替换点。
 - 按页面、标题和段落切块，块记录课程、资产、页码和内容类型。
 - SQLite FTS5 提供 BM25 全文检索。

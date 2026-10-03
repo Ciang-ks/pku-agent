@@ -1,3 +1,4 @@
+import { learningToolNames } from "../../../packages/core/src/agent/learning-tools.js";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -665,6 +666,7 @@ describe("local API", () => {
     expect(created.statusCode).toBe(201);
     expect(created.json().data).toMatchObject({ persistent: true, name: "概率复习" });
     expect(created.json().data.tools).toEqual([
+      ...learningToolNames,
       "search_course",
       "read_course_asset",
       "list_course_resources",

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { ApiClient, ApiError } from "./api";
 import CourseWorkspaceView from "./components/CourseWorkspaceView.vue";
 import CandidateWorkspaceView from "./components/CandidateWorkspaceView.vue";
+import DiscoverCoursesDialog from "./components/DiscoverCoursesDialog.vue";
 import CreateCourseDialog from "./components/CreateCourseDialog.vue";
 import DoctorPanel from "./components/DoctorPanel.vue";
 import type { CourseTimelineItem, CourseWorkspace, DoctorCheck, JobRecord } from "./types";
@@ -20,6 +21,8 @@ const createError = ref("");
 const connectionError = ref("");
 const showToken = ref(!token.value);
 const showCreate = ref(false);
+const showDiscover = ref(false);
+function openImportedCourse(course: CourseWorkspace) { showDiscover.value = false; selectedCourse.value = course; void refresh(); }
 const showDoctor = ref(false);
 const doctorLoading = ref(false);
 const doctorChecks = ref<DoctorCheck[]>([]);
@@ -149,7 +152,8 @@ onMounted(() => {
             <p class="eyebrow">YOUR COURSES</p>
             <h2>课程工作区</h2>
           </div>
-          <button class="button primary" @click="showCreate = true">＋ 新建课程</button>
+          <button class="button primary" @click="showDiscover = true">从教学网获取课程</button>
+          <button class="button secondary" @click="showCreate = true">手工新建</button>
         </header>
 
         <p v-if="connectionError" class="notice error" role="alert">
@@ -217,6 +221,7 @@ onMounted(() => {
       </footer>
     </main>
 
+    <DiscoverCoursesDialog v-if="showDiscover" :api="api" @close="showDiscover = false" @imported="openImportedCourse" />
     <CreateCourseDialog
       v-if="showCreate"
       :pending="createPending"

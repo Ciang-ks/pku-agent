@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-import { createApplication, runDoctor } from "@pku-study/core";
+import { configureCloudHttp, createApplication, runDoctor } from "@pku-study/core";
 import { createServer, loadOrCreateApiToken } from "@pku-study/server";
 import { Command } from "commander";
+
+configureCloudHttp();
 
 const program = new Command()
   .name("pku-study")

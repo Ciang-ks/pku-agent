@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch, nextTick } from "vue";
 import { ApiClient } from "../api";
 import type {
   CourseWorkspace,
+  Lesson,
   IntegrationState,
   JobRecord,
   DocumentSearchResult,
   RemoteContentNode,
+  RemoteResourceDetail,
   TeachingItem,
   TeachingItemKind,
   PracticeSet,
@@ -14,14 +16,32 @@ import type {
   CourseNoteSource,
   TeachingNetworkAnnouncementDetail,
 } from "../types";
+import { pageAssistantScope, noteAssistantScope, type AssistantScope, type AssistantRequest } from "../assistant-scope";
+import MaterialLibrary from "./MaterialLibrary.vue";
+import LearningWorkspace from "./LearningWorkspace.vue";
 import RemoteResourceTree from "./RemoteResourceTree.vue";
 import CourseAgentPanel from "./CourseAgentPanel.vue";
 
 const props = defineProps<{ course: CourseWorkspace; api: ApiClient }>();
 defineEmits<{ back: [] }>();
 
-const tab = ref<"overview" | "resources" | "recordings" | "practice" | "notes">("overview");
+const tab = ref<"lessons" | "library" | "overview" | "resources" | "recordings" | "practice" | "notes">("lessons");
+const lessonDirty = ref(false);
 const resources = ref<RemoteContentNode[]>([]);
+const resourceDetail = ref<RemoteResourceDetail>();
+const resourceDetailError = ref("");
+let detailRequest = 0;
+async function showResourceDetail(resource: RemoteContentNode) {
+  const request = ++detailRequest;
+  resourceDetail.value = undefined;
+  resourceDetailError.value = "";
+  try {
+    const detail = await props.api.getRemoteResource(props.course.courseId, resource.resourceId);
+    if (request === detailRequest) resourceDetail.value = detail;
+  } catch (cause) {
+    if (request === detailRequest) resourceDetailError.value = cause instanceof Error ? cause.message : "读取资源详情失败";
+  }
+}
 const overview = ref<TeachingItem[]>([]);
 const integration = ref<IntegrationState>();
 const activeJob = ref<JobRecord>();
@@ -36,9 +56,52 @@ const documentLoading = ref(false);
 const documentMessage = ref("");
 const documentError = ref("");
 const showAgent = ref(false);
-const agentPrompt = ref("");
-const agentMode = ref<"course" | "lecture-notes">("course");
-const agentNoteSources = ref<string[]>([]);
+const learning = ref<InstanceType<typeof LearningWorkspace>>();
+const library = ref<InstanceType<typeof MaterialLibrary>>();
+const activeLesson = ref<Lesson>();
+const noteScope = ref<AssistantScope>();
+const scopes = ref<AssistantScope[]>([]);
+const requests = ref<Record<string, AssistantRequest>>({});
+const busyScopes = ref<Record<string, boolean>>({});
+const notices = ref<Record<string, string>>({});
+let requestId = 0;
+const assistantScope = computed(() => noteScope.value ?? pageAssistantScope(props.course.courseId, props.course.name, tab.value, activeLesson.value));
+const activeBusy = computed(() => Boolean(busyScopes.value[assistantScope.value.key]));
+const backgroundTasks = computed(() => scopes.value.filter(s => s.key !== assistantScope.value.key && (busyScopes.value[s.key] || notices.value[s.key])));
+watch(tab, () => { noteScope.value = undefined; });
+watch(assistantScope, scope => {
+  if (showAgent.value) rememberScope(scope);
+  delete notices.value[scope.key];
+});
+function rememberScope(scope: AssistantScope) {
+  const index = scopes.value.findIndex(s => s.key === scope.key);
+  if (index < 0) scopes.value.push(scope);
+  else scopes.value[index] = scope;
+}
+function openAssistant(prompt = "", autoSend = false) {
+  const scope = assistantScope.value;
+  rememberScope(scope); showAgent.value = true;
+  if (prompt && !busyScopes.value[scope.key]) requests.value[scope.key] = { id: ++requestId, prompt, autoSend };
+}
+function returnToTask(scope: AssistantScope) {
+  if (scope.lessonId) {
+    tab.value = "lessons";
+    void props.api.getLesson(props.course.courseId, scope.lessonId).then(lesson => {
+      if (lessonDirty.value) return;
+      activeLesson.value = lesson;
+      learning.value?.select(lesson);
+    }).catch(cause => error.value = cause instanceof Error ? cause.message : "课次读取失败");
+  } else if (scope.kind === "lecture-notes") {
+    tab.value = "notes";
+    void nextTick(() => { noteScope.value = scope; });
+  } else tab.value = "overview";
+  showAgent.value = true;
+}
+function agentCompleted(scope: AssistantScope, success: boolean) {
+  if (scope.key !== assistantScope.value.key) notices.value[scope.key] = success ? "已完成" : "需要查看";
+  if (scope.kind === "lesson") void learning.value?.refresh();
+  else { void library.value?.refresh(); void Promise.all([loadResources(), loadOverview(), loadPractice()]); }
+}
 const assignmentApprovals = ref<Record<string, string>>({});
 const assignmentMessage = ref("");
 const announcementDetail = ref<TeachingNetworkAnnouncementDetail>();
@@ -53,15 +116,7 @@ const selectedNoteSources = ref<string[]>([]);
 const noteLoading = ref(false);
 const noteError = ref("");
 
-const modules = [
-  { key: "resources", title: "课堂资料", meta: "教学网资源树与本地资产", mark: "01", ready: true },
-  { key: "recordings", title: "录播与转写", meta: "视频、音频与逐字稿", mark: "02", ready: true },
-  { key: "practice", title: "自测练习", meta: "题目与答案分离阅读", mark: "03", ready: true },
-  { key: "notes", title: "讲义生成", meta: "确认课件与录播稿素材", mark: "04", ready: true },
-  { key: "assignments", title: "作业工作台", meta: "草稿、检查与人工提交", mark: "05" },
-  { key: "reviews", title: "选课风评", meta: "树洞证据与维度评分", mark: "06" },
-  { key: "qa", title: "课程问答", meta: "资料与树洞双语境检索", mark: "07" }
-];
+
 
 async function loadResources() {
   loading.value = true;
@@ -174,23 +229,16 @@ async function openNotes() {
 function openNoteAgent() {
   const paths = selectedNoteSources.value;
   if (!paths.length) return;
-  agentPrompt.value = [
+  const prompt = [
     "/skill:lecture-notes",
     "请只使用以下已确认的已索引素材生成课堂笔记；不要检索或引用其他课程文件：",
     ...paths.map((path) => `- ${path}`),
     "完成后按 Skill 要求保存笔记，并返回保存路径。",
   ].join("\n");
-  agentMode.value = "lecture-notes";
-  agentNoteSources.value = paths;
-  showAgent.value = true;
+  noteScope.value = noteAssistantScope(props.course.courseId, paths);
+  openAssistant(prompt, true);
 }
 
-function openCourseAgent() {
-  agentMode.value = "course";
-  agentPrompt.value = "";
-  agentNoteSources.value = [];
-  showAgent.value = true;
-}
 
 async function selectPractice(name: string) {
   practiceLoading.value = true;
@@ -377,7 +425,7 @@ function recordings() {
 
 <template>
   <main class="workspace-view">
-    <button class="back-link" @click="$emit('back')">← 返回课程列表</button>
+    <button class="back-link" :disabled="lessonDirty" @click="$emit('back')">← 返回课程列表</button>
     <header class="course-hero">
       <div>
         <p class="eyebrow">{{ course.term }} · COURSE</p>
@@ -385,30 +433,16 @@ function recordings() {
         <p>{{ course.teacher }} · {{ course.remoteCourseId || course.courseId }}</p>
       </div>
       <div class="course-actions">
-        <button class="button secondary" @click="openCourseAgent">课程助手</button>
+        <button class="button ghost" :disabled="lessonDirty" @click="openAssistant()">学习助手{{ activeBusy ? ' · 处理中' : '' }}</button>
         <span class="phase-tag">{{ course.remoteCourseId ? "PKU3B MAPPED" : "LOCAL ONLY" }}</span>
       </div>
     </header>
 
-    <template v-if="tab === 'overview'">
-      <section class="workspace-grid" aria-label="课程功能">
-        <button
-          v-for="module in modules"
-          :key="module.key"
-          class="module-card"
-          :class="{ ready: module.ready }"
-          :disabled="!module.ready"
-          @click="module.key === 'resources' ? openResources() : module.key === 'recordings' ? openRecordings() : module.key === 'practice' ? openPractice() : module.key === 'notes' ? openNotes() : undefined"
-        >
-          <span class="module-mark">{{ module.mark }}</span>
-          <span class="module-copy">
-            <strong>{{ module.title }}</strong>
-            <small>{{ module.meta }}</small>
-          </span>
-          <span class="coming-soon">{{ module.ready ? "打开 →" : "下一阶段" }}</span>
-        </button>
-      </section>
-
+    <nav class="learning-tabs" aria-label="课程工作区"><button :class="{ selected: tab === 'lessons' }" @click="tab = 'lessons'">课次学习</button><button :class="{ selected: tab === 'library' }" :disabled="lessonDirty" @click="tab = 'library'">公共资料</button><button :class="{ selected: !['lessons', 'library'].includes(tab) }" :disabled="lessonDirty" @click="tab = 'overview'">教学网</button></nav>
+    <nav v-if="!['lessons', 'library'].includes(tab)" class="result-nav" aria-label="教学网内容"><button class="button ghost" @click="tab = 'overview'">动态与作业</button><button class="button ghost" @click="openResources">资料</button><button class="button ghost" @click="openRecordings">录播</button><details><summary>历史内容</summary><button class="button ghost" @click="openPractice">历史课程练习</button><button class="button ghost" @click="openNotes">旧版独立笔记</button></details></nav>
+    <LearningWorkspace ref="learning" v-show="tab === 'lessons'" :course="course" :api="api" :agent-busy="activeBusy" @active-change="activeLesson = $event" @assistant="openAssistant($event, true)" @dirty-change="lessonDirty = $event" />
+    <MaterialLibrary ref="library" v-if="tab === 'library'" :course-id="course.courseId" :api="api" />
+    <template v-else-if="tab === 'overview'">
       <section class="overview-panel">
         <header class="section-header compact">
           <div>
@@ -468,6 +502,7 @@ function recordings() {
         </ul>
       </section>
 
+      <details class="course-maintenance"><summary>课程检索与维护</summary>
       <section class="document-search-panel">
         <header class="section-header compact">
           <div>
@@ -498,14 +533,15 @@ function recordings() {
       <section class="workspace-path">
         <p class="eyebrow">LOCAL WORKSPACE</p>
         <code>{{ course.rootPath }}</code>
-        <p>课程资料将以 PDF 与 Markdown 为中心保存在此目录；数据库只记录索引和运行状态。</p>
+        <p>原文件与讲义保存在课程目录；课次关系、索引和生成成果同时保存在本地数据库。</p>
       </section>
+      </details>
     </template>
 
     <section v-else-if="tab === 'recordings'" class="recording-section">
       <header class="remote-header">
         <div>
-          <button class="section-back" @click="tab = 'overview'">← 课程概览</button>
+          <button class="section-back" @click="tab = 'overview'">← 动态与作业</button>
           <p class="eyebrow">RECORDINGS · TRANSCRIPTION</p>
           <h2>录播与转写</h2>
         </div>
@@ -543,7 +579,7 @@ function recordings() {
     <section v-else-if="tab === 'practice'" class="practice-section">
       <header class="remote-header">
         <div>
-          <button class="section-back" @click="tab = 'overview'">← 课程概览</button>
+          <button class="section-back" @click="tab = 'overview'">← 动态与作业</button>
           <p class="eyebrow">SELF STUDY · PRACTICE</p>
           <h2>自测练习</h2>
         </div>
@@ -594,7 +630,7 @@ function recordings() {
     <section v-else-if="tab === 'notes'" class="notes-section">
       <header class="remote-header">
         <div>
-          <button class="section-back" @click="tab = 'overview'">← 课程概览</button>
+          <button class="section-back" @click="tab = 'overview'">← 动态与作业</button>
           <p class="eyebrow">LECTURE NOTES · SOURCES</p>
           <h2>笔记素材</h2>
         </div>
@@ -622,10 +658,10 @@ function recordings() {
       </div>
     </section>
 
-    <section v-else class="remote-section">
+    <section v-else-if="tab === 'resources'" class="remote-section">
       <header class="remote-header">
         <div>
-          <button class="section-back" @click="tab = 'overview'">← 课程概览</button>
+          <button class="section-back" @click="tab = 'overview'">← 动态与作业</button>
           <p class="eyebrow">TEACHING NETWORK · PKU3B</p>
           <h2>教学网资源</h2>
         </div>
@@ -661,12 +697,30 @@ function recordings() {
         :nodes="resources"
         :busy-resource-id="busyResourceId"
         @import="importResource"
+        @detail="showResourceDetail"
       />
       <div v-else class="resource-empty">
         <span>⇣</span>
         <h3>尚未同步教学网资源</h3>
         <p>同步只读取资源元数据；点击单项“导入”后才会下载附件到课程目录。</p>
       </div>
+      <p v-if="resourceDetailError" class="notice error">{{ resourceDetailError }}</p>
+      <section v-if="resourceDetail" class="announcement-detail-panel resource-detail-panel">
+        <header class="section-header compact">
+          <h2>{{ resourceDetail.title }}</h2>
+          <button class="button secondary" @click="resourceDetail = undefined">关闭详情</button>
+        </header>
+        <p v-if="!resourceDetail.detailsAvailable" class="muted">请重新同步课程以读取正文和附件信息。</p>
+        <template v-else>
+          <p v-for="(paragraph, index) in resourceDetail.descriptions" :key="index">{{ paragraph }}</p>
+          <p v-if="!resourceDetail.descriptions.length" class="muted">没有正文说明。</p>
+          <ul v-if="resourceDetail.attachments.length">
+            <li v-for="(attachment, index) in resourceDetail.attachments" :key="index">{{ attachment.name }}</li>
+          </ul>
+          <p v-else class="muted">{{ resourceDetail.kind === 'file' ? '文件名将在下载时由教学网返回。' : '没有附件。' }}</p>
+          <a v-if="resourceDetail.sourceUrl" :href="resourceDetail.sourceUrl" target="_blank" rel="noopener noreferrer">在教学网查看原文</a>
+        </template>
+      </section>
     </section>
 
     <div v-if="showOtp" class="dialog-backdrop">
@@ -688,14 +742,21 @@ function recordings() {
       </section>
     </div>
 
+    <div v-if="backgroundTasks.length" class="assistant-task-strip" aria-label="其他范围的助手任务"><button v-for="scope in backgroundTasks" :key="scope.key" class="button ghost" :disabled="lessonDirty" @click="returnToTask(scope)">{{ scope.label }} · {{ busyScopes[scope.key] ? '处理中' : notices[scope.key] }}</button></div>
     <CourseAgentPanel
-      v-if="showAgent"
+      v-for="scope in scopes"
+      v-show="showAgent && scope.key === assistantScope.key"
+      :key="scope.key"
       :course="course"
       :api="api"
-      :initial-prompt="agentPrompt"
-      :mode="agentMode"
-      :note-source-paths="agentNoteSources"
-      :auto-send="agentMode === 'lecture-notes'"
+      :lesson-id="scope.lessonId"
+      :scope-label="scope.label"
+      :mode="scope.kind === 'lecture-notes' ? 'lecture-notes' : 'course'"
+      :note-source-paths="scope.sourcePaths ?? []"
+      :request="requests[scope.key]"
+      :visible="showAgent && scope.key === assistantScope.key"
+      @busy-change="busyScopes[scope.key] = $event"
+      @completed="agentCompleted(scope, $event)"
       @close="showAgent = false"
     />
   </main>

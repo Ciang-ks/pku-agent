@@ -1,3 +1,6 @@
+import { lessonSessionSchema, LearningError } from "@pku-study/core";
+import { agentTurnFailure } from "./agent-turn-status.js";
+import { registerLearningRoutes } from "./routes/learning-routes.js";
 import { access } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,6 +98,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<P
       });
     }
   });
+
+  await registerLearningRoutes(server, app);
 
   server.get("/health", async () => ({ status: "ok", service: "pku-study" }));
 
@@ -236,7 +241,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<P
       try {
         const created = await app.agent.createCourseSession(
           request.params.courseId,
-          parsed.data.name ? { name: parsed.data.name } : {},
+          { ...(parsed.data.name ? { name: parsed.data.name } : {}), ...(parsed.data.assetIds ? { assetIds: parsed.data.assetIds } : {}) },
         );
         agentSessions.set(created.session.sessionId, {
           courseId: request.params.courseId,
@@ -245,7 +250,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<P
         return reply.code(201).send({
           ok: true,
           data: {
-            ...agentSessionInfo(created.session, request.params.courseId, Boolean(parsed.data.name)),
+            ...agentSessionInfo(created.session, request.params.courseId, Boolean(parsed.data.name) && !parsed.data.assetIds?.length),
             modelAvailable: Boolean(created.session.model),
             ...(created.modelFallbackMessage ? { modelFallbackMessage: created.modelFallbackMessage } : {}),
           },
@@ -255,6 +260,19 @@ export async function createServer(options: CreateServerOptions = {}): Promise<P
       }
     },
   );
+
+  server.post<{ Params: { courseId: string; lessonId: string } }>("/api/courses/:courseId/lessons/:lessonId/session", async (request, reply) => {
+    const parsed = lessonSessionSchema.safeParse(request.body);
+    if (!parsed.success) return invalidRequest(reply, parsed.error.issues.map(i => i.message));
+    try {
+      const created = await app.agent.createLessonSession(request.params.courseId, request.params.lessonId, parsed.data.contextId, parsed.data.assetIds);
+      agentSessions.set(created.session.sessionId, { courseId: request.params.courseId, session: created.session });
+      return reply.code(201).send({ ok: true, data: { ...agentSessionInfo(created.session, request.params.courseId, false), modelAvailable: Boolean(created.session.model) } });
+    } catch (error) {
+      if (error instanceof LearningError) return reply.code(error.statusCode).send({ ok: false, error: { code: error.code, message: error.message, retryable: false } });
+      return agentError(reply, error);
+    }
+  });
 
   server.post<{ Params: { courseId: string }; Body: unknown }>(
     "/api/courses/:courseId/lecture-notes/session",
@@ -346,9 +364,12 @@ export async function createServer(options: CreateServerOptions = {}): Promise<P
         const projected = projectAgentEvent(event);
         if (projected) writeAgentEvent(response, projected.type, projected.data);
       });
+      const messageStart = record.session.state.messages.length;
       try {
         await record.session.prompt(parsed.data.message, { expandPromptTemplates: false, source: "rpc" });
-        writeAgentEvent(response, "complete", { sessionId: request.params.sessionId });
+        const failure = agentTurnFailure(record.session.state.messages.slice(messageStart));
+        if (failure) writeAgentEvent(response, "error", failure);
+        else writeAgentEvent(response, "complete", { sessionId: request.params.sessionId });
       } catch (error) {
         writeAgentEvent(response, "error", {
           code: "AGENT_UNAVAILABLE",
@@ -864,6 +885,7 @@ function agentSessionNotFound(reply: import("fastify").FastifyReply) {
 }
 
 function agentError(reply: import("fastify").FastifyReply, error: unknown) {
+  if (error instanceof LearningError) return reply.code(error.statusCode).send({ ok: false, error: { code: error.code, message: error.message, retryable: false } });
   const statusCode = isAgentDomainError(error) ? error.statusCode : 503;
   const code = isAgentDomainError(error) ? error.code : "AGENT_UNAVAILABLE";
   const message = statusCode === 404
@@ -890,6 +912,7 @@ function agentSessionInfo(
   courseId: string;
   tools: string[];
   modelAvailable: boolean;
+  model?: { provider: string; id: string };
   persistent: boolean;
   name?: string;
   messages: Array<{ role: "user" | "assistant"; text: string }>;
@@ -900,6 +923,7 @@ function agentSessionInfo(
     courseId,
     tools: session.getActiveToolNames(),
     modelAvailable: Boolean(session.model),
+    ...(session.model ? { model: { provider: session.model.provider, id: session.model.id } } : {}),
     persistent,
     ...(name ? { name } : {}),
     messages: projectSessionMessages(session),

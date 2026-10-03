@@ -22,10 +22,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     checkCommand("ffprobe", ["-version"], "FFprobe", "Install FFprobe with FFmpeg to inspect recordings."),
     checkOpenAiTranscription(),
     checkCommand("pandoc", ["--version"], "Pandoc", "Install Pandoc for PDF export."),
-    checkOneOf([
-      ["tectonic", ["--version"]],
-      ["xelatex", ["--version"]],
-    ], "LaTeX renderer", "Install Tectonic or TeX Live/XeLaTeX."),
+    checkPdfRenderer(),
     checkCommand(
       process.env.PKU_STUDY_MINERU_COMMAND?.trim() || "mineru",
       ["--version"],
@@ -112,16 +109,11 @@ async function checkCommand(
   }
 }
 
-async function checkOneOf(
-  commands: [string, string[]][],
-  label: string,
-  missingDetail: string,
-): Promise<DoctorCheck> {
-  for (const [command, args] of commands) {
-    const result = await checkCommand(command, args, label, missingDetail);
-    if (result.status === "ok") return { ...result, id: "pdf-renderer" };
-  }
-  return { id: "pdf-renderer", label, status: "missing", detail: missingDetail };
+async function checkPdfRenderer(): Promise<DoctorCheck> {
+  const engine = process.env.PKU_STUDY_PDF_ENGINE?.trim() || "xelatex";
+  const result = await checkCommand(engine, ["--version"], "LaTeX renderer",
+    `Configured PDF engine ${engine} is unavailable. Install it or set PKU_STUDY_PDF_ENGINE to an installed engine (e.g. tectonic).`);
+  return { ...result, id: "pdf-renderer" };
 }
 
 async function checkWritable(path: string, label: string): Promise<DoctorCheck> {

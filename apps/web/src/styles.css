@@ -1,16 +1,26 @@
 :root {
-  color: #1b211d;
-  background: #f1efe8;
+  color: var(--ink);
+  background: var(--paper);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", "Noto Sans SC", monospace;
   font-synthesis: none;
-  --ink: #1b211d;
-  --muted: #6e736d;
-  --paper: #f1efe8;
-  --paper-deep: #e8e5dc;
-  --line: #c8c7bf;
-  --green: #173f34;
-  --acid: #c4e94a;
-  --red: #a23b33;
+  color-scheme: light;
+  --ink: #2b2424;
+  --muted: #756766;
+  --paper: #faf7f2;
+  --paper-deep: #efe7e1;
+  --surface: #fffdfa;
+  --line: #ddd0ca;
+  --accent: #8c0000;
+  --accent-hover: #6e0000;
+  --accent-soft: #f3e3df;
+  --accent-line: #c99991;
+  --accent-wash: rgba(140, 0, 0, 0.045);
+  --on-accent: #fffaf7;
+  --focus: #aa3b32;
+  --danger: #b42318;
+  --danger-soft: #fff0ed;
+  --success: #4c765b;
+  --warning: #b07a24;
 }
 
 * {
@@ -22,8 +32,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    linear-gradient(rgba(27, 33, 29, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(27, 33, 29, 0.035) 1px, transparent 1px),
+    linear-gradient(rgba(100, 48, 40, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(100, 48, 40, 0.025) 1px, transparent 1px),
     var(--paper);
   background-size: 24px 24px;
 }
@@ -49,7 +59,7 @@ button {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--ink);
-  background: rgba(241, 239, 232, 0.92);
+  background: rgba(250, 247, 242, 0.94);
   backdrop-filter: blur(14px);
   position: sticky;
   top: 0;
@@ -73,8 +83,8 @@ button {
   display: grid;
   place-items: center;
   border: 1px solid var(--ink);
-  background: var(--green);
-  color: var(--paper);
+  background: var(--accent);
+  color: var(--on-accent);
   font-family: "Songti SC", "Noto Serif CJK SC", SimSun, serif;
   font-size: 19px;
 }
@@ -128,12 +138,12 @@ button {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #6e9f5b;
+  background: var(--success);
   box-shadow: 0 0 0 3px rgba(110, 159, 91, 0.14);
 }
 
 .job-indicator.active::before {
-  background: #dcaa32;
+  background: var(--warning);
   animation: pulse 1.2s infinite;
 }
 
@@ -177,7 +187,7 @@ button {
 }
 
 .intro h1 em {
-  color: var(--green);
+  color: var(--accent);
   font-style: normal;
   position: relative;
 }
@@ -189,13 +199,13 @@ button {
   left: 0;
   right: 0;
   bottom: 4px;
-  background: var(--acid);
+  background: var(--accent-soft);
   z-index: -1;
 }
 
 .intro-copy {
   margin: 0 0 7px;
-  color: #50564f;
+  color: #615250;
   font-family: "Songti SC", "Noto Serif CJK SC", SimSun, serif;
   line-height: 2;
   font-size: 14px;
@@ -360,7 +370,7 @@ button {
 }
 
 .candidate-create-form input:focus {
-  outline: 2px solid var(--acid);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -393,13 +403,13 @@ button {
 }
 
 .candidate-status.followed {
-  border-color: var(--green);
-  color: var(--green);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .candidate-status.rejected {
-  border-color: var(--red);
-  color: var(--red);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .candidate-meta h2 {
@@ -420,7 +430,7 @@ button {
 .candidate-review {
   min-width: 0;
   padding-left: 15px;
-  border-left: 2px solid var(--acid);
+  border-left: 2px solid var(--accent-line);
 }
 
 .candidate-review strong {
@@ -549,7 +559,7 @@ button {
 }
 
 .treehole-evidence code {
-  color: var(--green);
+  color: var(--accent);
 }
 
 .treehole-evidence p {
@@ -618,8 +628,29 @@ button {
 }
 
 .button.primary {
-  color: var(--paper);
-  background: var(--green);
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.button.primary:not(:disabled):hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  box-shadow: 3px 3px 0 var(--accent-line);
+}
+
+.button.secondary {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.button.secondary:not(:disabled):hover,
+.button.ghost:not(:disabled):hover {
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  box-shadow: 3px 3px 0 var(--accent-line);
 }
 
 .button.ghost {
@@ -712,7 +743,7 @@ button {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--acid);
+  background: var(--accent-soft);
   border: 1px solid var(--ink);
   top: 3px;
   left: 21px;
@@ -723,7 +754,7 @@ button {
   height: 48px;
   display: grid;
   place-items: center;
-  background: var(--green);
+  background: var(--accent);
   color: white;
   font-family: "Songti SC", "Noto Serif CJK SC", SimSun, serif;
 }
@@ -772,8 +803,8 @@ button {
 
 .notice.error,
 .form-error {
-  color: var(--red);
-  border-color: var(--red);
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .loading-state {
@@ -789,7 +820,7 @@ button {
 .loading-state span {
   width: 6px;
   height: 6px;
-  background: var(--green);
+  background: var(--accent);
   animation: bounce 1s infinite alternate;
 }
 
@@ -810,7 +841,7 @@ button {
   position: fixed;
   inset: 0;
   z-index: 50;
-  background: rgba(22, 27, 23, 0.58);
+  background: rgba(43, 24, 24, 0.5);
   backdrop-filter: blur(6px);
   display: grid;
   place-items: center;
@@ -821,7 +852,7 @@ button {
   width: min(610px, 100%);
   background: var(--paper);
   border: 1px solid var(--ink);
-  box-shadow: 11px 11px 0 rgba(10, 12, 10, 0.4);
+  box-shadow: 11px 11px 0 rgba(43, 24, 24, 0.4);
   padding: 30px;
 }
 
@@ -884,7 +915,7 @@ button {
 
 .dialog input:focus {
   border-color: var(--ink);
-  box-shadow: inset 0 -2px var(--acid);
+  box-shadow: inset 0 -2px var(--accent);
 }
 
 .field-row {
@@ -916,7 +947,7 @@ button {
   background: var(--paper);
   border-left: 1px solid var(--ink);
   padding: 30px;
-  box-shadow: -12px 0 30px rgba(10, 12, 10, 0.18);
+  box-shadow: -12px 0 30px rgba(43, 24, 24, 0.18);
 }
 
 .panel-copy {
@@ -950,16 +981,16 @@ button {
 }
 
 .status-dot.ok {
-  background: #4d8e5c;
+  background: var(--success);
 }
 
 .status-dot.warning {
-  background: #d99b2b;
+  background: var(--warning);
 }
 
 .status-dot.missing,
 .status-dot.unsupported {
-  background: var(--red);
+  background: var(--danger);
 }
 
 .check-item strong {
@@ -1017,7 +1048,7 @@ button {
 
 .phase-tag {
   padding: 8px 10px;
-  background: var(--acid);
+  background: var(--accent-soft);
   border: 1px solid var(--ink);
   font-size: 9px;
 }
@@ -1046,9 +1077,6 @@ button {
   align-items: end;
 }
 
-.button.secondary {
-  background: transparent;
-}
 
 .overview-grid {
   display: grid;
@@ -1106,12 +1134,12 @@ button {
 }
 
 .assignment-actions .text-button {
-  color: var(--green);
+  color: var(--accent);
   font-size: 9px;
 }
 
 .assignment-actions .text-button.danger {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .announcement-detail-panel {
@@ -1224,7 +1252,7 @@ button {
 
 .practice-list button:hover,
 .practice-list button.active {
-  background: var(--acid);
+  background: var(--accent-soft);
 }
 
 .practice-list strong,
@@ -1317,14 +1345,14 @@ button {
 }
 
 .note-source-row:hover {
-  background: var(--acid);
+  background: var(--accent-soft);
 }
 
 .note-source-row input {
   width: 15px;
   height: 15px;
   margin-top: 2px;
-  accent-color: var(--green);
+  accent-color: var(--accent);
 }
 
 .note-source-copy strong,
@@ -1378,7 +1406,7 @@ button {
 }
 
 .document-search-form input:focus {
-  outline: 2px solid var(--acid);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -1419,7 +1447,7 @@ button {
 
 .document-result-meta code {
   flex: 0 0 auto;
-  color: var(--green);
+  color: var(--accent);
 }
 
 .document-results p {
@@ -1450,7 +1478,7 @@ button {
 }
 
 .module-card.ready:hover {
-  background: rgba(196, 233, 74, 0.14);
+  background: var(--accent-wash);
 }
 
 .module-card:disabled {
@@ -1487,24 +1515,24 @@ button {
 .workspace-path {
   margin-top: 42px;
   padding: 26px;
-  background: var(--green);
-  color: var(--paper);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .workspace-path .eyebrow {
-  color: #aab8af;
+  color: #e7c7c0;
 }
 
 .workspace-path code {
   display: block;
   overflow-wrap: anywhere;
-  color: var(--acid);
+  color: var(--accent-soft);
   font-size: 12px;
 }
 
 .workspace-path > p:last-child {
   margin: 13px 0 0;
-  color: #bac5be;
+  color: #ecd7d1;
   font-family: "Songti SC", "Noto Serif CJK SC", SimSun, serif;
   font-size: 11px;
 }
@@ -1520,7 +1548,7 @@ button {
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   border-left: 1px solid var(--ink);
   background: var(--paper);
-  box-shadow: -12px 0 28px rgba(10, 12, 10, 0.18);
+  box-shadow: -12px 0 28px rgba(43, 24, 24, 0.18);
 }
 
 .agent-panel-header {
@@ -1577,8 +1605,8 @@ button {
 
 .agent-message.user p {
   padding: 11px 13px;
-  border-left: 3px solid var(--green);
-  background: rgba(23, 63, 52, 0.08);
+  border-left: 3px solid var(--accent);
+  background: var(--accent-wash);
 }
 
 .agent-activity,
@@ -1629,8 +1657,8 @@ button {
 }
 
 .agent-skill:hover:not(:disabled) {
-  border-color: var(--green);
-  background: rgba(23, 63, 52, 0.08);
+  border-color: var(--accent);
+  background: var(--accent-wash);
 }
 
 .agent-skill:disabled {
@@ -1643,9 +1671,9 @@ button {
 }
 
 .agent-error {
-  color: var(--red);
-  border-top-color: var(--red);
-  background: rgba(162, 59, 51, 0.06);
+  color: var(--danger);
+  border-top-color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .agent-composer {
@@ -1669,7 +1697,7 @@ button {
 }
 
 .agent-composer textarea:focus {
-  outline: 2px solid var(--acid);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -1738,7 +1766,7 @@ button {
 .job-progress > span {
   position: absolute;
   inset: 0 auto 0 0;
-  background: var(--acid);
+  background: var(--accent-soft);
   transition: width 300ms ease;
 }
 
@@ -1771,7 +1799,7 @@ button {
 }
 
 .resource-row.imported {
-  background: rgba(23, 63, 52, 0.035);
+  background: var(--accent-wash);
 }
 
 .resource-kind {
@@ -1806,14 +1834,14 @@ button {
 }
 
 .resource-action:not(:disabled):hover {
-  background: var(--green);
-  color: var(--paper);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .imported-mark {
   padding: 5px 7px;
-  background: var(--green);
-  color: var(--paper);
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 8px;
 }
 
@@ -2013,3 +2041,117 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Course learning: document first, with shared materials and lesson scope beside it. */
+.learning-workspace { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 28px; margin: 24px 0; align-items: start; }
+.lesson-sidebar { border-right: 1px solid var(--line); padding-right: 20px; display: grid; gap: 12px; }
+.learning-toolbar { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.learning-toolbar h2, .learning-toolbar h3 { margin: 0; }
+.learning-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.learning-tabs { display: flex; flex-wrap: wrap; gap: 5px; border-bottom: 1px solid var(--line); margin: 18px 0; }
+.learning-tabs button { border: 0; background: transparent; padding: 13px 16px; cursor: pointer; font: inherit; color: inherit; }
+.learning-tabs button.selected { border-bottom: 3px solid var(--accent); color: var(--accent); font-weight: 700; }
+.lesson-item { display: grid; gap: 8px; padding: 17px; text-align: left; background: transparent; border: 1px solid var(--line); color: inherit; cursor: pointer; font: inherit; }
+.lesson-item.selected { background: var(--accent-soft); border-color: var(--accent); box-shadow: inset 3px 0 var(--accent); }
+.lesson-item.selected strong { color: var(--accent); }
+.lesson-item small, .lesson-item span { font-size: 12px; opacity: .72; }
+.lesson-form, .outline-editor { display: grid; gap: 12px; }
+.lesson-main { min-width: 0; }
+.learning-workspace input, .learning-workspace select, .learning-workspace textarea { max-width: 100%; padding: 10px; border: 1px solid var(--line); background: var(--surface); font: inherit; color: var(--ink); box-sizing: border-box; }
+.lesson-form input, .lesson-form select { width: 100%; }
+.document-editor { width: 100%; min-height: 65vh; resize: vertical; font-family: monospace !important; line-height: 1.8; }
+.learning-document { max-width: 860px; font-size: 16px; line-height: 1.9; overflow-wrap: anywhere; padding: 18px 4px 60px; }
+.learning-document h1, .learning-document h2, .learning-document h3 { line-height: 1.4; margin-top: 1.5em; }
+.learning-document pre { overflow: auto; background: var(--paper-deep); padding: 16px; }
+.learning-document img { max-width: 100%; height: auto; display: block; margin: 18px auto; }
+.learning-document blockquote { border-left: 3px solid var(--accent-line); margin-left: 0; padding-left: 18px; }
+.table-scroll { overflow-x: auto; }
+.learning-document table { border-collapse: collapse; width: 100%; }
+.learning-document th, .learning-document td { padding: 9px 12px; border: 1px solid var(--line); text-align: left; }
+.lesson-empty { padding: 70px 30px; background: var(--paper-deep); line-height: 1.8; }
+.material-drop { border: 2px dashed var(--accent-line); padding: 25px; display: flex; flex-wrap: wrap; gap: 15px; align-items: center; }
+.material-drop.dragging { background: var(--accent-soft); border-color: var(--accent); }
+.material-drop input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.material-drop small { width: 100%; }
+.material-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.material-row > div:first-child { flex: 1; min-width: 140px; overflow-wrap: anywhere; }
+.material-row small { display: block; margin-top: 6px; opacity: .7; }
+.outline-topic, .source-card { display: grid; gap: 10px; padding: 18px; border: 1px solid var(--line); margin: 12px 0; overflow-wrap: anywhere; }
+.outline-topic textarea { min-height: 100px; resize: vertical; }
+@media (max-width: 850px) { .learning-workspace { grid-template-columns: 1fr; } .lesson-sidebar { border-right: 0; border-bottom: 1px solid var(--line); padding: 0 0 20px; } .learning-toolbar { flex-wrap: wrap; } }
+
+.discover-dialog { display: flex; flex-direction: column; gap: 12px; max-height: calc(100dvh - 32px); overflow: hidden; }
+.discover-dialog > :not(.discover-course-list) { flex-shrink: 0; }
+.discover-dialog > p { margin: 0; }
+.discover-course-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 8px; }
+.discover-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.discover-filters > input { flex: 1; min-width: 160px; }
+.discover-filters label { display: flex; gap: 8px; align-items: center; }
+.discover-filters input[type="checkbox"] { width: auto; }
+.lesson-math-block { overflow-x: auto; max-width: 100%; padding: 0.25rem 0; }
+
+/* Lesson-first workspace: results, then sources, then optional workflows. */
+.result-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 16px 0; }
+.lesson-detail { padding: 14px 0; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.lesson-detail summary, .lesson-artifact summary, .result-nav summary { cursor: pointer; color: var(--muted); }
+.lesson-artifact { padding: 18px 0; border-bottom: 1px solid var(--line); }
+.scope-field { display: grid; gap: 8px; margin: 16px 0; }
+.scope-field input { width: 100%; }
+.source-picker { margin: 20px 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
+.public-reference-picker { margin: 20px 0; padding: 18px; border: 1px solid var(--accent-line); border-radius: 12px; background: var(--accent-wash); }
+.public-reference-picker h3 { margin: 0; }
+.public-reference-picker p, .public-reference-picker small { color: var(--muted); }
+.public-reference-list { max-height: 300px; overflow: auto; margin: 8px 0 16px; }
+.public-reference-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; cursor: pointer; }
+.public-reference-option input { flex: 0 0 auto; margin-top: 4px; }
+.public-reference-option span { min-width: 0; overflow-wrap: anywhere; }
+.public-reference-option small { display: block; margin-top: 4px; }
+.public-reference-auto { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--line); }
+.source-picker-blocks { max-height: 420px; overflow: auto; margin-bottom: 16px; }
+.source-choice { display: flex; gap: 12px; align-items: flex-start; padding: 12px 4px; border-bottom: 1px solid var(--paper-deep); }
+.source-choice input { flex: 0 0 auto; margin-top: 6px; }
+.source-choice span span { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+.source-choice small { color: var(--muted); }
+.agent-context { margin: 8px 20px; font-size: 12px; color: var(--muted); max-height: 170px; overflow: auto; }
+.reference-chips { display: flex; flex-wrap: wrap; gap: 6px; grid-column: 1 / -1; }
+.reference-chips button { color: var(--accent); border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: 6px; padding: 5px 8px; max-width: 100%; overflow-wrap: anywhere; }
+.composer-picker { display: grid; grid-column: 1 / -1; max-height: 200px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.composer-picker button { text-align: left; background: transparent; border: 0; padding: 10px 12px; cursor: pointer; }
+.composer-picker button.selected, .composer-picker button:hover { background: var(--accent-soft); color: var(--accent); }
+.agent-composer small { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+.lesson-files .material-row small { display: block; }
+@media (max-width: 720px) { .lesson-files .material-row { align-items: flex-start; flex-direction: column; } .result-nav { gap: 4px; } }
+
+.workspace-view .course-hero { padding-bottom: 24px; margin-bottom: 24px; }
+.workspace-view .course-hero h1 { font-size: clamp(28px, 4vw, 48px); }
+
+.assistant-scope { padding: 12px 24px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+.assistant-scope strong { overflow-wrap: anywhere; }
+.assistant-scope small, .assistant-scope p { color: var(--muted); font-size: 12px; margin: 0; }
+.assistant-scope .button { justify-self: start; font-size: 11px; padding: 6px 8px; }
+.agent-session-settings { padding: 10px 24px; font-size: 12px; }
+.agent-session-settings summary { cursor: pointer; color: var(--muted); }
+.assistant-task-strip { position: fixed; bottom: 16px; left: 20px; z-index: 25; max-width: calc(100vw - 40px); background: var(--paper); border: 1px solid var(--accent-line); }
+.course-agent-panel { overflow: auto; }
+.agent-messages { min-height: 100px; }
+
+.course-agent-panel { display: flex; flex-direction: column; overflow-y: auto; }
+.course-agent-panel > * { flex-shrink: 0; }
+.course-agent-panel > .agent-messages { flex: 1 1 auto; min-height: 100px; }
+.assistant-scope { align-content: start; }
+.assistant-scope .button { align-self: start; }
+.course-maintenance { padding: 18px 0; border-top: 1px solid var(--ink); margin-top: 24px; }
+.course-maintenance > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+
+/* Brand accents share one palette; system health retains distinct status colors. */
+::selection { background: var(--accent-soft); color: var(--accent); }
+:where(button, a, input, select, textarea, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+input[type="checkbox"], input[type="radio"], progress { accent-color: var(--accent); }
+:where(.nav-button, .back-link, .section-back):hover { color: var(--accent); border-color: var(--accent); }
+:where(.learning-tabs button, .lesson-item):not(:disabled):not(.selected):hover { background: var(--accent-wash); }
+.learning-tabs button:disabled { opacity: .45; cursor: not-allowed; }
+:where(.learning-document, .resource-detail-panel, .announcement-detail-panel) a { color: var(--accent); text-decoration-color: var(--accent-line); text-underline-offset: 3px; }
+:where(.learning-document, .resource-detail-panel, .announcement-detail-panel) a:hover { color: var(--accent-hover); text-decoration-color: currentColor; }
+.phase-tag { color: var(--accent); border-color: var(--accent-line); }
+.learning-document th { background: var(--accent-wash); }
+.material-drop:focus-within { border-color: var(--accent); background: var(--accent-wash); }

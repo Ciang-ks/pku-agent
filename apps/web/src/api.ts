@@ -1,3 +1,4 @@
+import type { Lesson, Material, MaterialRole, LessonOutline, SourceSelection, CreateLessonInput, LessonMaterialRef, LessonContext } from "./types";
 import type {
   CourseWorkspace,
   DoctorCheck,
@@ -5,6 +6,7 @@ import type {
   JobRecord,
   RemoteContentNode,
   RemoteResource,
+  RemoteResourceDetail,
   CourseDocumentBlock,
   DocumentSearchResult,
   CourseNoteSource,
@@ -38,7 +40,47 @@ export class ApiError extends Error {
 export class ApiClient {
   constructor(private readonly getToken: () => string) {}
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  listLessons(courseId: string): Promise<Lesson[]> { return this.request(`/api/courses/${courseId}/lessons`); }
+  getLesson(courseId: string, lessonId: string): Promise<Lesson> { return this.request(`/api/courses/${courseId}/lessons/${lessonId}`); }
+  createLesson(courseId: string, input: CreateLessonInput): Promise<Lesson> {
+    return this.request(`/api/courses/${courseId}/lessons`, { method: "POST", body: JSON.stringify(input) });
+  }
+  saveLessonDocument(lesson: Lesson, markdown: string): Promise<Lesson> {
+    return this.request(`/api/courses/${lesson.courseId}/lessons/${lesson.lessonId}/document`, { method: "PUT", body: JSON.stringify({ revision: lesson.revision, markdown }) });
+  }
+  saveLessonOutline(lesson: Lesson, outline: LessonOutline): Promise<Lesson> {
+    return this.request(`/api/courses/${lesson.courseId}/lessons/${lesson.lessonId}/outline`, { method: "PUT", body: JSON.stringify({ revision: lesson.revision, outline }) });
+  }
+  saveLessonSelections(lesson: Lesson, selections: SourceSelection[]): Promise<Lesson> {
+    return this.request(`/api/courses/${lesson.courseId}/lessons/${lesson.lessonId}/selections`, { method: "PUT", body: JSON.stringify({ revision: lesson.revision, selections }) });
+  }
+  saveLessonInputs(lesson: Lesson, materialRefs: LessonMaterialRef[], focus = lesson.focus ?? "", autoPublic = lesson.autoPublic !== false, excludedBlockIds = lesson.excludedBlockIds ?? []): Promise<Lesson> {
+    return this.request(`/api/courses/${lesson.courseId}/lessons/${lesson.lessonId}/inputs`, { method: "PUT", body: JSON.stringify({ revision: lesson.revision, materialRefs, focus, autoPublic, excludedBlockIds }) });
+  }
+  lessonContext(courseId: string, lessonId: string, assetIds: string[] = []): Promise<LessonContext> {
+    return this.request(`/api/courses/${courseId}/lessons/${lessonId}/context`, { method: "POST", body: JSON.stringify({ assetIds }) });
+  }
+  createLessonSession(courseId: string, lessonId: string, contextId: string, assetIds: string[] = []): Promise<AgentSessionInfo> {
+    return this.request(`/api/courses/${courseId}/lessons/${lessonId}/session`, { method: "POST", body: JSON.stringify({ contextId, assetIds }) });
+  }
+  materialBlocks(material: Material): Promise<CourseDocumentBlock[]> { return this.request(`/api/courses/${material.courseId}/materials/${material.assetId}/blocks`); }
+  listMaterials(courseId: string): Promise<Material[]> { return this.request(`/api/courses/${courseId}/materials`); }
+  uploadMaterial(courseId: string, file: File, role: MaterialRole, lesson?: Lesson): Promise<Material> {
+    return this.request(`/api/courses/${courseId}/materials?${new URLSearchParams({ filename: file.name, role, ...(lesson ? { lessonId: lesson.lessonId, revision: String(lesson.revision) } : {}) })}`, {
+      method: "POST", body: file, headers: { "content-type": "application/octet-stream" },
+    });
+  }
+  parseMaterial(material: Material): Promise<Material> { return this.request(`/api/courses/${material.courseId}/materials/${material.assetId}/parse`, { method: "POST", body: "{}" }); }
+  classifyMaterial(material: Material, role: MaterialRole): Promise<Material> {
+    return this.request(`/api/courses/${material.courseId}/materials/${material.assetId}`, { method: "PATCH", body: JSON.stringify({ role }) });
+  }
+  async materialBlob(courseId: string, path: string): Promise<Blob> {
+    const response = await fetch(`/api/courses/${courseId}/material-file?${new URLSearchParams({ path })}`, { headers: { authorization: `Bearer ${this.getToken().trim()}` } });
+    if (!response.ok) throw new ApiError("无法读取资料文件", response.status);
+    return response.blob();
+  }
+
+  async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const token = this.getToken().trim();
     const response = await fetch(path, {
       ...init,
@@ -233,6 +275,10 @@ export class ApiClient {
     return this.request(`/api/courses/${encodeURIComponent(courseId)}/remote-resources`);
   }
 
+  getRemoteResource(courseId: string, resourceId: string): Promise<RemoteResourceDetail> {
+    return this.request(`/api/courses/${encodeURIComponent(courseId)}/remote-resources/${encodeURIComponent(resourceId)}`);
+  }
+
   syncRemoteResources(
     courseId: string,
     input: { force?: boolean; otp?: string } = {}
@@ -265,10 +311,10 @@ export class ApiClient {
     });
   }
 
-  createCourseAgentSession(courseId: string, name?: string): Promise<AgentSessionInfo> {
+  createCourseAgentSession(courseId: string, name?: string, assetIds: string[] = []): Promise<AgentSessionInfo> {
     return this.request(`/api/courses/${encodeURIComponent(courseId)}/sessions`, {
       method: "POST",
-      ...(name?.trim() ? { body: JSON.stringify({ name: name.trim() }) } : {}),
+      body: JSON.stringify({ ...(name?.trim() ? { name: name.trim() } : {}), ...(assetIds.length ? { assetIds } : {}) }),
     });
   }
 

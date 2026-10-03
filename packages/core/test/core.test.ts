@@ -132,6 +132,7 @@ describe("teaching-network sync", () => {
         coursesDir: join(root, "courses"),
       },
       pku3b: fake,
+      documentParser: { parse: async () => ({ title: "第一讲", blocks: [{ contentType: "paragraph", page: 1, text: "自动入库的课件内容" }] }) },
     });
     contexts.push(app);
     const course = await app.courses.create({
@@ -152,6 +153,9 @@ describe("teaching-network sync", () => {
     expect((await app.teachingNetwork.wait(imported.jobId)).status).toBe("completed");
     const saved = app.teachingNetwork.listResources(course.courseId)[0]!;
     expect(saved.isImported).toBe(true);
+    const material = app.materials.list(course.courseId)[0]!;
+    expect(material.status).toBe("ready");
+    expect(app.documents.readIndexedAsset(course.courseId, material.sourcePath!)[0]!.text).toBe("自动入库的课件内容");
     expect(saved.localPath).toContain(join(course.rootPath, "materials", "original"));
     expect(await readFile(join(saved.localPath!, "lecture.pdf"), "utf8")).toBe("fixture");
     expect(fake.writes[0]).toMatchObject({
@@ -250,6 +254,7 @@ describe("teaching-network sync", () => {
     expect((await app.teachingNetwork.wait(job.jobId)).status).toBe("completed");
     expect(fake.writes.at(-1)).toMatchObject({
       kind: "assignment-download",
+      allTerm: true,
       id: "_assignment_1",
       outdir: join(course.rootPath, "assignments", "assignment-1", `.staging-${job.jobId}`),
     });
@@ -654,6 +659,7 @@ describe("restricted Pi tools", () => {
       candidates: app.candidates,
       agentDir: join(root, "config", "pi-agent"),
       sessionDir: join(root, "data", "agent-sessions"),
+      learning: { lessons: app.lessons, materials: app.materials, recordings: app.recordings, documents: app.documents, teachingNetwork: app.teachingNetwork },
       sessionFactory: async (options) => {
         capturedOptions = options;
         return {} as Awaited<ReturnType<NonNullable<ConstructorParameters<typeof PiAgentService>[0]["sessionFactory"]>>>;
@@ -668,7 +674,8 @@ describe("restricted Pi tools", () => {
     expect(registered).not.toEqual(expect.arrayContaining(["bash", "write", "edit", "submit_assignment"]));
     const skills = capturedOptions?.resourceLoader?.getSkills().skills ?? [];
     expect(skills.map((skill) => skill.name).sort()).toEqual([...courseSkillNames].sort());
-    expect(skills.every((skill) => skill.disableModelInvocation)).toBe(true);
+    expect(skills.filter(skill => skill.name !== "lesson-learning").every((skill) => skill.disableModelInvocation)).toBe(true);
+    expect(skills.find(skill => skill.name === "lesson-learning")?.disableModelInvocation).toBe(false);
     expect(skills.every((skill) => skill.filePath.startsWith(join(root, "config", "pi-agent", "pku-study-skills")))).toBe(true);
     expect(await readFile(join(root, "config", "pi-agent", "pku-study-skills", "lecture-notes", "SKILL.md"), "utf8")).toContain(
       "save_lecture_note",

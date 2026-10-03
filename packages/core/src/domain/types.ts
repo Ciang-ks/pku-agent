@@ -136,6 +136,14 @@ export interface RemoteContentNode extends RemoteResourceRef {
   children: RemoteContentNode[];
 }
 
+export interface RemoteResourceDetail extends RemoteResourceRef {
+  detailsAvailable: boolean;
+  descriptions: string[];
+  attachments: { name: string }[];
+  sourceUrl?: string;
+  canImport: boolean;
+}
+
 export interface IntegrationState {
   provider: "pku3b";
   authState: AuthState;
@@ -196,6 +204,7 @@ export interface ParsedDocumentBlock {
 export interface ParsedDocument {
   title: string;
   blocks: ParsedDocumentBlock[];
+  attachments?: { path: string; data: Uint8Array }[];
 }
 
 export interface DocumentParserProvider {
@@ -308,7 +317,7 @@ export type AssignmentJobContext = {
   approvalId: string;
 };
 
-export type JobContext = TeachingNetworkJobContext | RecordingJobContext | AssignmentJobContext;
+export type JobContext = TeachingNetworkJobContext | RecordingJobContext | AssignmentJobContext | { operation: "transcribe-uploaded-recording"; courseId: string };
 
 export interface JobRecord {
   jobId: string;

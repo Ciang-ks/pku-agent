@@ -1,4 +1,4 @@
-import { lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, readdir, realpath, rm, stat } from "node:fs/promises";
 import { extname, join, relative, resolve, sep } from "node:path";
 import type {
   JobRecord,
@@ -107,43 +107,8 @@ export class RecordingService {
       if (!download.ok) return this.handleDownloadFailure(jobId, download);
       const videoPath = await findDownloadedMedia(downloadDir);
       this.options.jobs.update(jobId, { progress: 0.2, message: "正在按静音边界提取音频" });
-      const chunks = await this.audioProcessor.split({ videoPath, outputDir: audioDir });
-      await validateAudioChunks(chunks, audioDir);
-
-      const course = this.requireCourse(context.courseId);
       const recording = this.requireRecording(context.courseId, context.recordingId);
-      const transcripts: Array<AudioChunk & { text: string }> = [];
-      let previousText = "";
-      for (let index = 0; index < chunks.length; index += 1) {
-        const chunk = chunks[index]!;
-        this.options.jobs.update(jobId, {
-          progress: 0.2 + (0.65 * index) / chunks.length,
-          message: `正在转写片段 ${index + 1}/${chunks.length}`,
-        });
-        const result = await this.transcriptions.transcribe({
-          filePath: chunk.filePath,
-          prompt: transcriptionPrompt(course.name, course.teacher, recording.title, previousText),
-          keywords: [course.name, course.teacher, recording.title].filter(Boolean),
-          languages: ["zh-cn", "en"],
-        });
-        previousText = result.text.slice(-1_500);
-        transcripts.push({ ...chunk, text: result.text });
-      }
-
-      validateTranscriptCoverage(transcripts);
-      this.options.jobs.update(jobId, { progress: 0.9, message: "正在保存并索引转写稿" });
-      const asset = await this.options.courses.writeMarkdownAsset(
-        context.courseId,
-        "recording-transcript",
-        `${recording.title}-${context.recordingId}`,
-        transcriptMarkdown(course.name, recording.title, transcripts),
-      );
-      await this.options.documents.indexAsset(context.courseId, asset.sourcePath);
-      return this.options.jobs.update(jobId, {
-        status: "completed",
-        progress: 1,
-        message: asset.sourcePath,
-      });
+      return await this.transcribeMedia(jobId, context.courseId, videoPath, audioDir, recording.title, context.recordingId);
     } catch (error) {
       return this.fail(jobId, error);
     } finally {
@@ -152,6 +117,64 @@ export class RecordingService {
         this.options.teachingNetwork.clearVideoCache(context.recordingId),
       ]);
     }
+  }
+
+  /** Registered uploaded media use the same chunking/transcription pipeline as pku3b. */
+  async transcribeFile(courseId: string, filePath: string, title: string): Promise<JobRecord> {
+    const course = this.requireCourse(courseId);
+    if (!this.transcriptions.isAvailable()) throw new RecordingServiceError("TRANSCRIPTION_UNAVAILABLE", "请配置云端转写服务", 503);
+    const root = await realpath(course.rootPath);
+    const videoPath = await realpath(filePath);
+    if (!videoPath.startsWith(`${root}${sep}`) || !(await stat(videoPath)).isFile())
+      throw new RecordingServiceError("MEDIA_PATH_FORBIDDEN", "录播必须位于当前课程内", 400);
+    const job = this.options.jobs.create("recording.upload.transcribe", `转写 ${title}`);
+    this.options.store.setJobContext(job.jobId, { operation: "transcribe-uploaded-recording", courseId });
+    this.options.jobs.update(job.jobId, { status: "running", progress: 0.1, message: "正在提取上传录播的音频" });
+    const audioDir = join(this.options.paths.cacheDir, "recording-jobs", job.jobId, "audio");
+    try {
+      await mkdir(audioDir, { recursive: true });
+      return await this.transcribeMedia(job.jobId, courseId, videoPath, audioDir, title, job.jobId);
+    } catch (error) { return this.fail(job.jobId, error); }
+    finally { await rm(join(audioDir, ".."), { recursive: true, force: true }); }
+  }
+
+  private async transcribeMedia(jobId: string, courseId: string, videoPath: string, audioDir: string, title: string, identity: string): Promise<JobRecord> {
+    const course = this.requireCourse(courseId);
+    const chunks = await this.audioProcessor.split({ videoPath, outputDir: audioDir });
+    await validateAudioChunks(chunks, audioDir);
+
+    const transcripts: Array<AudioChunk & { text: string }> = [];
+    let previousText = "";
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index]!;
+      this.options.jobs.update(jobId, {
+        progress: 0.2 + (0.65 * index) / chunks.length,
+        message: `正在转写片段 ${index + 1}/${chunks.length}`,
+      });
+      const result = await this.transcriptions.transcribe({
+        filePath: chunk.filePath,
+        prompt: transcriptionPrompt(course.name, course.teacher, title, previousText),
+        keywords: [course.name, course.teacher, title].filter(Boolean),
+        languages: ["zh-cn", "en"],
+      });
+      previousText = result.text.slice(-1_500);
+      transcripts.push({ ...chunk, text: result.text });
+    }
+
+    validateTranscriptCoverage(transcripts);
+    this.options.jobs.update(jobId, { progress: 0.9, message: "正在保存并索引转写稿" });
+    const asset = await this.options.courses.writeMarkdownAsset(
+      courseId,
+      "recording-transcript",
+      `${title}-${identity}`,
+      transcriptMarkdown(course.name, title, transcripts),
+    );
+    await this.options.documents.indexAsset(courseId, asset.sourcePath);
+    return this.options.jobs.update(jobId, {
+      status: "completed",
+      progress: 1,
+      message: asset.sourcePath,
+    });
   }
 
   private handleDownloadFailure(

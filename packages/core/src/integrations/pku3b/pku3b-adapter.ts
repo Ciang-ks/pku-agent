@@ -1,7 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ToolResult } from "../../domain/types.js";
-import { isSupportedPku3bVersion, parsePku3bVersion, stripAnsi } from "./output.js";
+import { isSupportedPku3bVersion, parseCourseContentList, parsePku3bVersion, stripAnsi } from "./output.js";
+import { readCourseCatalog } from "./course-catalog.js";
+import { downloadPku3bContent } from "./download-compat.js";
+import { BlackboardReader } from "./blackboard-reader.js";
+import { TeachingAccessError, type StructuredTeachingAccess, type TeachingReadOptions } from "./structured-types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -10,6 +14,7 @@ export interface Pku3bAdapterOptions {
   configPath?: string;
   cacheDir?: string;
   timeoutMs?: number;
+  structured?: boolean;
 }
 
 export type Pku3bReadCommand =
@@ -30,7 +35,7 @@ export type Pku3bWriteCommand =
       allTerm?: boolean;
       otp?: string;
     }
-  | { kind: "assignment-download"; id: string; outdir: string; otp?: string }
+  | { kind: "assignment-download"; id: string; outdir: string; allTerm?: boolean; otp?: string; remoteCourseId?: string; assignmentTitle?: string }
   | { kind: "video-download"; id: string; outdir: string; otp?: string }
   | { kind: "assignment-submit"; id: string; path: string; otp?: string };
 
@@ -43,10 +48,42 @@ export interface Pku3bOutput {
 export class Pku3bAdapter {
   private readonly executable: string;
   private readonly timeoutMs: number;
+  readonly structured?: StructuredTeachingAccess;
 
   constructor(private readonly options: Pku3bAdapterOptions = {}) {
     this.executable = options.executable ?? "pku3b";
     this.timeoutMs = options.timeoutMs ?? 120_000;
+    if (options.cacheDir && (options.structured ?? process.env.PKU_STUDY_STRUCTURED_TEACHING !== "0")) {
+      const reader = new BlackboardReader(options.cacheDir);
+      this.structured = {
+        listCourses: (input = {}) => this.withSession(() => reader.listCourses(), input),
+        readCourse: (id, input = {}) => this.withSession(() => reader.readCourse(id), input),
+        downloadResource: (content, id, directory, input = {}) => this.withSession(async () => {
+          await reader.download(content, id, directory);
+          return { version: "0.16.x" };
+        }, input),
+      };
+    }
+  }
+
+  private async withSession<T>(operation: () => Promise<T>, input: TeachingReadOptions): Promise<ToolResult<T>> {
+    const version = await this.version();
+    if (!version.ok) return version;
+    if (!version.data.supported) return failure("PKU3B_UNSUPPORTED_VERSION", `Expected pku3b 0.16.x, found ${version.data.version}`, false);
+    const refresh = () => this.runRead({ kind: "course-content-list", allTerm: true, force: true, ...(input.otp ? { otp: input.otp } : {}) });
+    let refreshed = false;
+    if (input.force) { const result = await refresh(); if (!result.ok) return result; refreshed = true; }
+    try { return { ok: true, data: await operation() }; }
+    catch (error) {
+      if (!refreshed && error instanceof TeachingAccessError && error.code === "TEACHING_AUTH_REQUIRED") {
+        const result = await refresh();
+        if (!result.ok) return result;
+        try { return { ok: true, data: await operation() }; } catch (retryError) { error = retryError; }
+      }
+      return error instanceof TeachingAccessError
+        ? failure(error.code, error.message, /NETWORK|HTTP|AUTH/.test(error.code))
+        : failure("TEACHING_READ_FAILED", "教学网资源读取失败，请重新同步。", true);
+    }
   }
 
   async version(): Promise<ToolResult<{ version: string; supported: boolean }>> {
@@ -70,8 +107,36 @@ export class Pku3bAdapter {
     return this.run(commandArgs(command), false);
   }
 
+  async courseCatalog(titles: string[]) {
+    return this.options.cacheDir ? readCourseCatalog(this.options.cacheDir, titles) : [];
+  }
+
   async runWrite(command: Pku3bWriteCommand): Promise<ToolResult<Pku3bOutput>> {
-    return this.run(commandArgs(command), true);
+    const result = await this.run(commandArgs(command), true);
+    if (!result.ok && (command.kind === "course-content-download" || command.kind === "assignment-download") && this.options.cacheDir &&
+      result.error.code === "PKU3B_COMMAND_FAILED" && /expect redirection, but got status 200 OK/i.test(result.error.message)) {
+      try {
+        let ccid: string;
+        if (command.kind === "course-content-download") ccid = command.ccid;
+        else {
+          if (!command.remoteCourseId || !command.assignmentTitle) return result;
+          const listing = await this.runRead({ kind: "course-content-list", allTerm: true, ...(command.otp ? { otp: command.otp } : {}) });
+          if (!listing.ok) return listing;
+          const matches = parseCourseContentList(listing.data.stdout, "download").filter(({ resource }) =>
+            resource.remoteCourseId === command.remoteCourseId && resource.kind === "assignment" && resource.title === command.assignmentTitle);
+          if (matches.length !== 1) return result;
+          ccid = matches[0]!.resource.remoteResourceId;
+        }
+        await downloadPku3bContent({ cacheDir: this.options.cacheDir, ccid, outdir: command.outdir,
+          ...(command.kind === "course-content-download" && command.outputDescription ? { outputDescription: command.outputDescription } : {}) });
+        const version = await this.version();
+        if (!version.ok) return version;
+        return { ok: true, data: { stdout: "Downloaded course content using pku3b 0.16 WebDAV compatibility.", stderr: "", version: version.data.version } };
+      } catch {
+        return failure("PKU3B_DOWNLOAD_FAILED", "教学网文件下载失败，请刷新课程后重试。", true);
+      }
+    }
+    return result;
   }
 
   private async run(args: string[], sideEffect: boolean): Promise<ToolResult<Pku3bOutput>> {
@@ -212,6 +277,7 @@ function commandArgs(command: Pku3bReadCommand | Pku3bWriteCommand): string[] {
         command.id,
         "--dir",
         command.outdir,
+        ...(command.allTerm ? ["--all-term"] : []),
       ];
     case "video-download":
       return [

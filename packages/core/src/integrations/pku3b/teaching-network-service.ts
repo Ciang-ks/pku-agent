@@ -6,6 +6,7 @@ import type {
   JobRecord,
   RemoteContentNode,
   RemoteResourceRef,
+  RemoteResourceDetail,
   TeachingItem,
   TeachingItemKind,
   TeachingNetworkJobContext,
@@ -18,6 +19,8 @@ import type { CourseWorkspaceService } from "../../storage/course-workspace-serv
 import { slugify } from "../../storage/course-workspace-service.js";
 import type { AppPaths } from "../../paths.js";
 import { parseCourseContentList } from "./output.js";
+import { stableResourceId } from "./output.js";
+import type { StructuredTeachingAccess } from "./structured-types.js";
 import {
   courseLabelMatches,
   parseAnnouncementList,
@@ -34,6 +37,8 @@ import {
 } from "./pku3b-adapter.js";
 
 export interface Pku3bExecutor {
+  readonly structured?: StructuredTeachingAccess;
+  courseCatalog?(titles: string[]): Promise<import("./course-catalog.js").Pku3bCourseRef[]>;
   version(): Promise<ToolResult<{ version: string; supported: boolean }>>;
   runRead(command: Pku3bReadCommand): Promise<ToolResult<Pku3bOutput>>;
   runWrite(command: Pku3bWriteCommand): Promise<ToolResult<Pku3bOutput>>;
@@ -45,6 +50,7 @@ export interface TeachingNetworkServiceOptions {
   courses: CourseWorkspaceService;
   paths: AppPaths;
   pku3b?: Pku3bExecutor;
+  onResourceImported?: (courseId: string, directory: string, resourceId: string) => Promise<void>;
 }
 
 export class TeachingNetworkService {
@@ -92,6 +98,17 @@ export class TeachingNetworkService {
     return this.options.store.listRemoteResources(courseId);
   }
 
+  getResourceDetail(courseId: string, resourceId: string): RemoteResourceDetail {
+    this.requireMappedCourse(courseId);
+    const resource = this.options.store.getRemoteResource(resourceId);
+    if (!resource || resource.courseId !== courseId) throw new TeachingNetworkError("RESOURCE_NOT_FOUND", "课程资源不存在。", 404);
+    const content = this.options.store.getRemoteResourceContent(resourceId);
+    return { ...resource, detailsAvailable: Boolean(content), descriptions: content?.descriptions ?? [],
+      attachments: content?.attachments.map(a => ({ name: a.name })) ?? [],
+      ...(content ? { sourceUrl: content.sourceUrl } : {}),
+      canImport: !["section", "folder"].includes(resource.kind) && (!content || content.kind === "file" || content.descriptions.length > 0 || content.attachments.length > 0) };
+  }
+
   listTeachingItems(courseId: string, kind?: TeachingItemKind): TeachingItem[] {
     return this.options.store.listTeachingItems(courseId, kind);
   }
@@ -125,7 +142,7 @@ export class TeachingNetworkService {
     if (!detail) {
       throw new TeachingNetworkError("ANNOUNCEMENT_DETAIL_UNREADABLE", "Unable to parse the pku3b announcement detail.", 502);
     }
-    if (!courseLabelMatches(detail.courseLabel, course.name)) {
+    if (!courseLabelMatches(detail.courseLabel, course.name, course.term)) {
       throw new TeachingNetworkError("ANNOUNCEMENT_COURSE_MISMATCH", "The announcement detail belongs to a different course.", 502);
     }
     this.saveState("ready", "Teaching-network session is ready.", result.data.version);
@@ -181,19 +198,7 @@ export class TeachingNetworkService {
     if (!resource || resource.courseId !== courseId) {
       throw new TeachingNetworkError("RESOURCE_NOT_FOUND", "Remote resource not found.", 404);
     }
-    if (resource.isImported && resource.localPath) {
-      const job = this.options.jobs.create("pku3b.course-content.import", `资料已导入：${resource.title}`);
-      this.options.jobs.update(job.jobId, {
-        status: "running",
-        progress: 0.5,
-        message: "检查已导入资料",
-      });
-      return this.options.jobs.update(job.jobId, {
-        status: "completed",
-        progress: 1,
-        message: resource.localPath,
-      });
-    }
+    if (["section", "folder"].includes(resource.kind)) throw new TeachingNetworkError("RESOURCE_CONTAINER", "请展开栏目或文件夹，选择具体资源导入。", 400);
     const job = this.options.jobs.create("pku3b.course-content.import", `导入 ${resource.title}`);
     const context: TeachingNetworkJobContext = {
       operation: "import-course-resource",
@@ -317,6 +322,26 @@ export class TeachingNetworkService {
     otp?: string,
   ): Promise<JobRecord> {
     const course = this.requireMappedCourse(context.courseId);
+    if (this.pku3b.structured) {
+      const result = await this.pku3b.structured.readCourse(course.remoteCourseId!, { force: context.force, ...(otp ? { otp } : {}) });
+      if (!result.ok) return this.handleToolFailure(jobId, result);
+      const snapshot = result.data;
+      if (snapshot.schemaVersion !== 1 || snapshot.remoteCourseId !== course.remoteCourseId)
+        throw new TeachingNetworkError("TEACHING_SNAPSHOT_INVALID", "教学网资源快照与当前课程不匹配。", 502);
+      const ids = new Set(snapshot.contents.map(c => c.remoteResourceId));
+      if (ids.size !== snapshot.contents.length || snapshot.contents.some(c => !c.remoteResourceId.startsWith(`${course.remoteCourseId}:`) || (c.parentRemoteId && !ids.has(c.parentRemoteId))))
+        throw new TeachingNetworkError("TEACHING_SNAPSHOT_INVALID", "教学网资源层级不完整。", 502);
+      const resources = snapshot.contents.map(content => ({ resourceId: stableResourceId("pku3b", content.remoteResourceId),
+        courseId: course.courseId, provider: "pku3b" as const, remoteCourseId: course.remoteCourseId!, remoteResourceId: content.remoteResourceId,
+        kind: content.kind, title: content.title, ...(content.parentRemoteId ? { parentId: stableResourceId("pku3b", content.parentRemoteId) } : {}),
+        hasDetails: true, isImported: false, updatedAt: snapshot.fetchedAt }));
+      this.options.store.db.transaction(() => {
+        this.options.store.replaceRemoteResources(course.courseId, resources);
+        for (const content of snapshot.contents) this.options.store.saveRemoteResourceContent(stableResourceId("pku3b", content.remoteResourceId), content);
+      })();
+      this.saveState("ready", "Teaching-network structured resources are ready.");
+      return this.options.jobs.update(jobId, { status: "completed", progress: 1, message: `已同步 ${resources.filter(r => r.kind !== "section").length} 项资料及 ${resources.filter(r => r.kind === "section").length} 个栏目` });
+    }
     let result = await this.pku3b.runRead({
       kind: "course-content-list",
       allTerm: true,
@@ -368,6 +393,7 @@ export class TeachingNetworkService {
     const destination = join(course.rootPath, "materials", "original", resource.resourceId);
     if (await exists(destination)) {
       this.options.store.markRemoteResourceImported(resource.resourceId, destination);
+      await this.options.onResourceImported?.(course.courseId, destination, resource.resourceId);
       return this.options.jobs.update(jobId, {
         status: "completed",
         progress: 1,
@@ -382,7 +408,11 @@ export class TeachingNetworkService {
 
     let result: Awaited<ReturnType<Pku3bExecutor["runWrite"]>>;
     try {
-      result = await this.pku3b.runWrite({
+      const content = this.options.store.getRemoteResourceContent(resource.resourceId);
+      if (this.pku3b.structured && content) {
+        const downloaded = await this.pku3b.structured.downloadResource(content, course.remoteCourseId!, staging, otp ? { otp } : {});
+        result = downloaded.ok ? { ok: true, data: { stdout: "", stderr: "", version: downloaded.data.version } } : downloaded;
+      } else result = await this.pku3b.runWrite({
         kind: "course-content-download",
         ccid: resource.remoteResourceId,
         outdir: staging,
@@ -404,6 +434,7 @@ export class TeachingNetworkService {
     await mkdir(dirname(destination), { recursive: true });
     await rename(staging, destination);
     this.options.store.markRemoteResourceImported(resource.resourceId, destination);
+    await this.options.onResourceImported?.(course.courseId, destination, resource.resourceId);
     this.saveState("ready", "Teaching-network session is ready.", result.data.version);
     return this.options.jobs.update(jobId, {
       status: "completed",
@@ -477,7 +508,7 @@ export class TeachingNetworkService {
       if (!result.ok) return this.handleToolFailure(jobId, result);
       const candidates = entry.parse(result.data.stdout);
       parsedItems.push(
-        ...candidates.filter((item) => courseLabelMatches(item.courseLabel, course.name)),
+        ...candidates.filter((item) => courseLabelMatches(item.courseLabel, course.name, course.term)),
       );
       if (index === 0) this.saveState("ready", "Teaching-network session is ready.", result.data.version);
     }
@@ -528,6 +559,9 @@ export class TeachingNetworkService {
         kind: "assignment-download",
         id: context.assignmentId,
         outdir: staging,
+        allTerm: true,
+        remoteCourseId: course.remoteCourseId!,
+        assignmentTitle: this.requireAssignment(course.courseId, context.assignmentId).title,
         ...(otp ? { otp } : {}),
       });
       if (!result.ok) {

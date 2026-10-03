@@ -1,3 +1,8 @@
+import { CourseDiscoveryService } from "./integrations/pku3b/course-discovery-service.js";
+import { Pku3bAdapter } from "./integrations/pku3b/pku3b-adapter.js";
+import { LearningRepository } from "./learning/learning-repository.js";
+import { LessonService } from "./learning/lesson-service.js";
+import { MaterialService } from "./materials/material-service.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { PiAgentService } from "./agent/pi-agent-service.js";
@@ -27,7 +32,10 @@ export interface ApplicationContext {
   courses: CourseWorkspaceService;
   jobs: JobManager;
   teachingNetwork: TeachingNetworkService;
+  courseDiscovery: CourseDiscoveryService;
   documents: DocumentService;
+  lessons: LessonService;
+  materials: MaterialService;
   recordings: RecordingService;
   assignments: AssignmentService;
   pdf: PdfExportService;
@@ -68,18 +76,24 @@ export function createApplication(
   const store = new SqliteStore(paths.databasePath);
   const courses = new CourseWorkspaceService(store, paths.coursesDir);
   const jobs = new JobManager(store);
-  const teachingNetwork = new TeachingNetworkService({
-    store,
-    courses,
-    jobs,
-    paths,
-    ...(options.pku3b ? { pku3b: options.pku3b } : {}),
-  });
   const documents = new DocumentService({
     store,
     courses,
     ...(options.documentParser ? { parser: options.documentParser } : {}),
     ...(options.embeddings ? { embeddings: options.embeddings } : {}),
+  });
+  const learningRepository = new LearningRepository(store);
+  const materials = new MaterialService(learningRepository, courses, documents);
+  const lessons = new LessonService(learningRepository, courses, documents, store);
+  const pku3b = options.pku3b ?? new Pku3bAdapter({ configPath: paths.pku3bConfigPath, cacheDir: paths.pku3bCacheDir });
+  const courseDiscovery = new CourseDiscoveryService(pku3b, courses);
+  const teachingNetwork = new TeachingNetworkService({
+    store,
+    courses,
+    jobs,
+    paths,
+    onResourceImported: (courseId, directory, resourceId) => materials.importDirectory(courseId, directory, resourceId).then(() => undefined),
+    pku3b,
   });
   const treehole = options.treehole ?? defaultTreeholeProvider();
   const candidates = new CourseCandidateService(store, treehole);
@@ -110,7 +124,10 @@ export function createApplication(
     courses,
     jobs,
     teachingNetwork,
+    courseDiscovery,
     documents,
+    lessons,
+    materials,
     recordings,
     assignments,
     pdf,
@@ -123,6 +140,7 @@ export function createApplication(
       teachingNetwork,
       documents,
       candidates,
+      learning: { lessons, materials, recordings, teachingNetwork, documents },
       agentDir: join(paths.configDir, "pi-agent"),
       sessionDir: join(paths.dataDir, "agent-sessions"),
     }),
